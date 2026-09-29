@@ -1,0 +1,37 @@
+! NMC111 half cell with uniform particles: Li foil | separator | porous NMC111 cathode.
+! Units: cm, s, mol, A, V. Every parameter is described in docs/parameters.md.
+! mode = 'corrected' applies the fixes in docs/deviations.md. Faithful mode reproduces the
+! original research code and needs the original's fitted k_rxn and sigma, which are not distributed.
+
+&model
+  particle_model = 'uniform'
+/
+&cell
+  L_cath_um = 24, L_sep = 25.0d-4, nj = 43, sep_node = 22
+  eps = 0.5, eps_AM = 0.4, eps_sep = 0.39, tau_sep = 4.8, bruggeman = -0.5
+/
+&electrolyte
+  D = 2.0d-6, t_plus = 0.25, c_bulk = 1.0d-3
+  kappa_bg = 1.0d-8                      ! background (solvent) ionic conductivity [S/cm]
+/
+&active
+  sigma = 0.1, M = 96.46, rho = 4.6, Q_th = 0.150, R_p = 200.0d-7
+  k_rxn = 2.5d-6, alpha_a = 0.5, alpha_c = 0.5
+  k_Li = 1.0d-6, c_Li_ref = 1.0d-3       ! lithium foil
+/
+&operation
+  C_rate = 1.0            ! 1/h, positive = discharge
+  phi1_init = 4.1, phi2_init = 0.0, cs_init = 1.0d-5
+  t_max = 36000.0, n_steps = 36000   ! time step = t_max/n_steps
+  V_min = 2.5, V_max = 4.2           ! voltage cutoffs
+/
+&numerics
+  mode = 'corrected'
+/
+&protocol
+  steps = ''               ! empty: one constant-current step at C_rate down to V_min (docs/protocol.md)
+  cycles = 1
+/
+&output
+  file = 'Time_Voltage.txt', write_interval = 18.0
+/

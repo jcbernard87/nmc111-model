@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: fortran-lang/setup-fortran@v1
+        with:
+          compiler: gcc
+          version: 14
+      - name: Install bandsolver and this package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "bandsolver @ git+https://github.com/jcbernard87/bandsolver@v0.1.2"
+          python -m pip install -e ".[test,notebooks]" nbconvert ipykernel
+      - name: Build the Fortran and C++ programs
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+      - name: Tests
+        run: python -m pytest -q
+      - name: Execute notebooks
+        run: |
+          for nb in notebooks/*.ipynb; do
+            jupyter nbconvert --to notebook --execute "$nb" --output-dir "$RUNNER_TEMP" --ExecutePreprocessor.timeout=900
+          done

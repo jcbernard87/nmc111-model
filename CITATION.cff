@@ -1,0 +1,67 @@
+cff-version: 1.2.0
+message: >-
+  If you use this model in published work, please cite it, bandsolver, and
+  Newman's description of the BAND method (Electrochemical Systems, Appendix C).
+title: "nmc111-model: an NMC111 porous-electrode half-cell model with uniform-particle and agglomerate particle scales, solved with Newman's BAND method"
+type: software
+authors:
+  - given-names: John
+    family-names: Bernard
+version: 0.1.0
+date-released: 2026-09-29
+license: BSD-3-Clause
+repository-code: "https://github.com/jcbernard87/nmc111-model"
+url: "https://github.com/jcbernard87/nmc111-model"
+abstract: >-
+  A one-dimensional model of an NMC111 half cell (lithium foil, separator,
+  porous cathode) with two particle models: uniform-concentration particles,
+  or porous agglomerates of crystals coupled to the electrode through their
+  surfaces (a double-porosity model solved with a fully coupled, condensed
+  Newton step). Dilute-solution electrolyte transport, electronic conduction
+  and Butler-Volmer insertion kinetics are solved by finite volumes, backward
+  Euler and Newton's method with the BAND block-tridiagonal solver. It runs
+  constant-current, constant-voltage and rest protocols. Fortran, C++ and
+  Python implementations read the same input file.
+keywords:
+  - lithium-ion battery
+  - NMC111
+  - porous electrode
+  - agglomerate model
+  - electrochemistry
+  - Newman
+  - Fortran
+  - C++
+  - Python
+references:
+  - type: software
+    title: "bandsolver: Newman's BAND block-tridiagonal solver in Fortran and C++ with Python bindings"
+    authors:
+      - given-names: John
+        family-names: Bernard
+    doi: 10.5281/zenodo.22997640
+    repository-code: "https://github.com/jcbernard87/bandsolver"
+  - type: book
+    title: Electrochemical Systems
+    authors:
+      - given-names: John
+        family-names: Newman
+      - given-names: Karen E.
+        family-names: Thomas-Alyea
+    edition: "3rd"
+    publisher:
+      name: Wiley-Interscience
+    year: 2004
+    isbn: "0-471-47756-7"
+    notes: "Appendix C, Numerical Solution of Coupled, Ordinary Differential Equations."
+  - type: article
+    title: "Numerical Solution of Coupled, Ordinary Differential Equations"
+    authors:
+      - given-names: John
+        family-names: Newman
+    journal: "Industrial & Engineering Chemistry Fundamentals"
+    volume: 7
+    issue: 3
+    start: 514
+    end: 517
+    year: 1968
+    doi: "10.1021/i160027a025"

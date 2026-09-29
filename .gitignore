@@ -1,0 +1,18 @@
+build*/
+.venv/
+__pycache__/
+*.mod
+*.o
+*.so
+.ipynb_checkpoints/
+# never commit results, data or legacy material
+runs/
+out/
+*.txt
+!requirements*.txt
+!CMakeLists.txt
+private/
+*.egg-info/
+
+# private development notes live outside the repository
+NMC_LOOP.md

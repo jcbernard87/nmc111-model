@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nmc111-model"
+version = "0.1.0"
+description = "NMC111 porous-electrode half-cell model with uniform-particle and agglomerate particle scales, solved with bandsolver"
+license = "BSD-3-Clause"
+requires-python = ">=3.9"
+dependencies = ["numpy", "bandsolver>=0.1.2"]
+
+[project.optional-dependencies]
+notebooks = ["matplotlib", "jupyterlab"]
+test = ["pytest", "scipy"]
+
+[tool.setuptools.packages.find]
+where = ["python"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "private_checks"]
+pythonpath = ["."]

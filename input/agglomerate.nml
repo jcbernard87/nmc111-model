@@ -1,0 +1,45 @@
+! NMC111 half cell with porous agglomerates of crystals: Li foil | separator | porous cathode.
+! Units: cm, s, mol, A, V. Every parameter is described in docs/parameters.md; the model in
+! docs/model.md section 6. mode = 'corrected' is the double-porosity model with a coupled Newton
+! step. Faithful mode reproduces the original research code and needs the original's fitted
+! values (D_agg, k_rxn, tortuosity_e, mass_loading), which are not distributed.
+
+&model
+  particle_model = 'agglomerate'
+/
+&cell
+  L_cath_um = 100, L_sep = 25.0d-4, nj = 75, sep_node = 22
+  eps = 0.4, eps_sep = 0.39, tau_sep = 4.0, bruggeman = -0.5
+/
+&electrolyte
+  D = 2.89d-6, t_plus = 0.375, c_bulk = 1.0d-3
+  kappa_bg = 1.0d-8                      ! background (solvent) ionic conductivity [S/cm]
+/
+&active
+  sigma = 0.1, M = 96.46, rho = 4.7, Q_th = 0.155
+  k_rxn = 2.5d-6, alpha_a = 0.5, alpha_c = 0.5
+  k_Li = 1.0d-6, c_Li_ref = 1.0d-3       ! lithium foil
+/
+&agglomerate
+  nja = 33                               ! nodes along an agglomerate radius
+  R_agg = 5.0d-4, R_xtal = 200.0d-7      ! agglomerate and crystal radii [cm]
+  eps_agg = 0.2                          ! agglomerate porosity
+  mass_loading = 0.020, percent_active = 0.95, mol_vol = 0.0476881609
+  tau_agg = -1, sigma_agg = -1           ! < 0: eps_agg**-0.5 (Bruggeman) and sigma
+  dt_s = 1.0                             ! time step [s]
+/
+&operation
+  C_rate = 1.0            ! 1/h, positive = discharge
+  phi1_init = 4.3, cs_init = 1.0d-5
+  V_min = 3.0, V_max = 4.4               ! voltage cutoffs
+/
+&numerics
+  mode = 'corrected'
+/
+&protocol
+  steps = ''
+  cycles = 1
+/
+&output
+  file = 'Time_Voltage.txt', write_interval = 18.0
+/
