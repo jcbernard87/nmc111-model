@@ -52,8 +52,13 @@ def softplus(x):
 
 
 def sigmoid(x):
-    """1 / (1 + e^-x)."""
-    return 0.5 * (1.0 + np.tanh(0.5 * x))
+    """1 / (1 + e^-x), evaluated without cancellation for either sign of x.
+
+    (Use sigmoid(-x) for 1 - sigmoid(x): near full the difference would cancel.)
+    """
+    x = np.asarray(x, dtype=float)
+    e = np.exp(-np.abs(x))
+    return np.where(x >= 0, 1.0 / (1.0 + e), e / (1.0 + e))
 
 
 def logit(theta):
@@ -75,30 +80,31 @@ class LogKinetics:
         self.F = F
         self.ln_pre = math.log(F * k * c_bulk ** alpha_a * cs_max ** (alpha_a + alpha_c))
 
-    def _rk(self, th):
+    def _rk(self, th, om):
+        """The Redlich-Kister sum and its theta-derivative; om = 1 - theta, computed separately."""
         x = 2 * th - 1
         rk = np.zeros_like(th)
         drk = np.zeros_like(th)
         for k, a in enumerate(self.ak):
             with np.errstate(divide="ignore", invalid="ignore"):
-                rk = rk + a * (x ** (k + 1) - (2 * th * k * (1 - th)) / x ** (1 - k))
+                rk = rk + a * (x ** (k + 1) - (2 * th * k * om) / x ** (1 - k))
             term = 2.0 * (2 * k + 1) * x ** k
             if k >= 2:
-                term = term - 4.0 * k * (k - 1) * th * (1 - th) * x ** (k - 2)
+                term = term - 4.0 * k * (k - 1) * th * om * x ** (k - 2)
             drk = drk + a * term
         return rk, drk
 
     def ocp(self, u, s):
-        rk, _ = self._rk(sigmoid(s))
+        rk, _ = self._rk(sigmoid(s), sigmoid(-s))
         return self.U_ref + self.rtf * (u - s) + rk
 
     def rate(self, x):
         """i_n [A/cm2, anodic positive] and d i_n / d(u, phi1, phi2, s), stacked on the last axis."""
         u, s = x[..., U], x[..., S]
-        th = sigmoid(s)
-        rk, drk = self._rk(th)
+        th, om = sigmoid(s), sigmoid(-s)                 # theta and 1 - theta
+        rk, drk = self._rk(th, om)
         U_ = self.U_ref + self.rtf * (u - s) + rk
-        dU_ds = -self.rtf + drk * th * (1 - th)
+        dU_ds = -self.rtf + drk * th * om
         ln_i0 = self.ln_pre + self.aa * u - self.aa * softplus(s) - self.ac * softplus(-s)
         eta = x[..., P1] - x[..., P2] - U_
         with np.errstate(over="ignore"):
@@ -107,7 +113,7 @@ class LogKinetics:
         i = ea - ec
         di_deta = self.aa * self.f * ea + self.ac * self.f * ec
         d_u = i * self.aa - di_deta * self.rtf
-        d_s = i * (-self.aa * th + self.ac * (1 - th)) - di_deta * dU_ds
+        d_s = i * (-self.aa * th + self.ac * om) - di_deta * dU_ds
         return i, np.stack([d_u, di_deta, -di_deta, d_s], axis=-1)
 
 
@@ -221,7 +227,7 @@ class Electrode:
             th, thold = sigmoid(x[jr, S]), sigmoid(xold[jr, S])
             R[jr, S] = vf * kin.cs_max * (th - thold) / dt + a * i / F
             B[jr, S, :] = a * di / F
-            B[jr, S, S] += vf * kin.cs_max * th * (1 - th) / dt
+            B[jr, S, S] += vf * kin.cs_max * th * sigmoid(-x[jr, S]) / dt
         return R, A, B, D
 
 
@@ -255,10 +261,10 @@ def physical_update(x, dx, frozen_s=False):
     and their round-off (in u or s) is physically irrelevant; convergence is judged on c, phi and
     theta instead. With frozen_s the S column is not a particle (the agglomerate model's electrode).
     """
-    th = sigmoid(x[..., S])
+    th, om = sigmoid(x[..., S]), sigmoid(-x[..., S])
     parts = [np.exp(x[..., U]) * np.abs(dx[..., U]), np.abs(dx[..., P1]), np.abs(dx[..., P2])]
     if not frozen_s:
-        parts.append(th * (1 - th) * np.abs(dx[..., S]))
+        parts.append(th * om * np.abs(dx[..., S]))
     return max(float(np.max(p)) for p in parts)
 
 

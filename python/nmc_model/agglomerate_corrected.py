@@ -179,7 +179,7 @@ class CorrectedModel:
         th, thold = sigmoid(xa[..., S]), sigmoid(xaold[..., S])
         R[..., S] = (1.0 - ea) * self.cs_max * (th - thold) / dt + self.a_x * i / F
         B[..., S, :] = self.a_x * di / F
-        B[..., S, S] += (1.0 - ea) * self.cs_max * th * (1 - th) / dt
+        B[..., S, S] += (1.0 - ea) * self.cs_max * th * sigmoid(-xa[..., S]) / dt
         return R, A, B, D
 
     def surface_flux(self, xa):

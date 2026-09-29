@@ -198,3 +198,13 @@ def test_charge_empties_the_crystals_smoothly():
     assert r.exit_reason == "end_of_protocol"
     th = CorrectedModel(p).cs(r.final_state) / CorrectedModel(p).cs_max
     assert th.max() < 1e-3                                  # nearly empty, reached without clipping
+
+
+def test_sigmoid_keeps_precision_at_the_limits():
+    """theta = sigmoid(s) and 1 - theta = sigmoid(-s) keep full relative precision far into the tails
+    (a 0.5 (1 + tanh(s/2)) form rounds theta to exactly 0 below s ~ -37)."""
+    from nmc_model.logcore import sigmoid
+    for s in (-40.0, -200.0, -700.0):
+        assert sigmoid(s) == pytest.approx(math.exp(s), rel=1e-12)
+        assert sigmoid(-s) == 1.0
+    assert sigmoid(0.0) == 0.5

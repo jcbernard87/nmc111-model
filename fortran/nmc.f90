@@ -1681,8 +1681,15 @@ contains
     end function softplus
 
     pure real(dp) function sigm(x)
+        !! 1/(1 + e^-x) without cancellation for either sign (use sigm(-x) for 1 - sigm(x)).
         real(dp), intent(in) :: x
-        sigm = 0.5_dp*(1.0_dp + tanh(0.5_dp*x))
+        real(dp) :: e
+        e = exp(-abs(x))
+        if (x >= 0.0_dp) then
+            sigm = 1.0_dp/(1.0_dp + e)
+        else
+            sigm = e/(1.0_dp + e)
+        end if
     end function sigm
 
     subroutine lrate(x, agg, i, di)
@@ -1691,11 +1698,11 @@ contains
         real(dp), intent(in) :: x(NV)
         logical, intent(in) :: agg
         real(dp), intent(out) :: i, di(NV)
-        real(dp) :: rtf, ff, th, xx, rk, drk, term, uref, csm, dU_ds, ln_i0, eta, ea, ec, di_deta
+        real(dp) :: rtf, ff, th, om, xx, rk, drk, term, uref, csm, dU_ds, ln_i0, eta, ea, ec, di_deta
         integer :: k, nk
         rtf = R*T/F
         ff = 1.0_dp/rtf
-        th = sigm(x(ICS))
+        th = sigm(x(ICS)); om = sigm(-x(ICS))     ! theta and 1 - theta
         xx = 2*th - 1
         rk = 0.0_dp; drk = 0.0_dp
         if (agg) then
@@ -1705,19 +1712,19 @@ contains
         end if
         do k = 0, nk
             if (agg) then
-                rk = rk + AK_A(k)*(xx**(k + 1) - (2*th*k*(1 - th))/xx**(1 - k))
+                rk = rk + AK_A(k)*(xx**(k + 1) - (2*th*k*om)/xx**(1 - k))
             else
-                rk = rk + AK_U(k)*(xx**(k + 1) - (2*th*k*(1 - th))/xx**(1 - k))
+                rk = rk + AK_U(k)*(xx**(k + 1) - (2*th*k*om)/xx**(1 - k))
             end if
             term = 2.0_dp*(2*k + 1)*xx**k
-            if (k >= 2) term = term - 4.0_dp*k*(k - 1)*th*(1 - th)*xx**(k - 2)
+            if (k >= 2) term = term - 4.0_dp*k*(k - 1)*th*om*xx**(k - 2)
             if (agg) then
                 drk = drk + AK_A(k)*term
             else
                 drk = drk + AK_U(k)*term
             end if
         end do
-        dU_ds = -rtf + drk*th*(1 - th)
+        dU_ds = -rtf + drk*th*om
         ln_i0 = log(F*k_rxn*c_bulk**alpha_a*csm**(alpha_a + alpha_c)) + alpha_a*x(IC) &
                 - alpha_a*softplus(x(ICS)) - alpha_c*softplus(-x(ICS))
         eta = x(IP1) - x(IP2) - (uref + rtf*(x(IC) - x(ICS)) + rk)
@@ -1728,7 +1735,7 @@ contains
         di(IC) = i*alpha_a - di_deta*rtf
         di(IP1) = di_deta
         di(IP2) = -di_deta
-        di(ICS) = i*(-alpha_a*th + alpha_c*(1 - th)) - di_deta*dU_ds
+        di(ICS) = i*(-alpha_a*th + alpha_c*om) - di_deta*dU_ds
     end subroutine lrate
 
     subroutine sg_face(xa, xb, g, gs, Fv, dFa, dFb)
@@ -1824,7 +1831,7 @@ contains
                 th = sigm(x(ICS,j)); tho = sigm(xold(ICS,j))
                 Rr(ICS,j) = vf_AM*cs_max()*(th - tho)/dt + spec_a*i/F
                 B(ICS,:,j) = spec_a*di/F
-                B(ICS,ICS,j) = B(ICS,ICS,j) + vf_AM*cs_max()*th*(1 - th)/dt
+                B(ICS,ICS,j) = B(ICS,ICS,j) + vf_AM*cs_max()*th*sigm(-x(ICS,j))/dt
             end do
         end if
         G = -Rr
@@ -1854,7 +1861,7 @@ contains
             phys_update = max(phys_update, exp(x(IC,j))*abs(d(IC,j)), abs(d(IP1,j)), abs(d(IP2,j)))
             if (.not. frozen_s) then
                 th = sigm(x(ICS,j))
-                phys_update = max(phys_update, th*(1 - th)*abs(d(ICS,j)))
+                phys_update = max(phys_update, th*sigm(-x(ICS,j))*abs(d(ICS,j)))
             end if
         end do
     end function phys_update
@@ -1988,7 +1995,7 @@ contains
                 th = sigm(cag(ICS,j,l)); tho = sigm(cold(ICS,j,l))
                 Rr(ICS) = (1.0_dp - eps_agg)*csmax_a*(th - tho)/h + a_x*i/F
                 Bq(ICS,:,q) = a_x*di/F
-                Bq(ICS,ICS,q) = Bq(ICS,ICS,q) + (1.0_dp - eps_agg)*csmax_a*th*(1 - th)/h
+                Bq(ICS,ICS,q) = Bq(ICS,ICS,q) + (1.0_dp - eps_agg)*csmax_a*th*sigm(-cag(ICS,j,l))/h
                 Gq(:,q) = -Rr
             end do
         end do

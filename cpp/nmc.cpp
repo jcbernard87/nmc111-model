@@ -214,7 +214,11 @@ double bern_p(double x) {  // B'(x) = B(x) (1 - B(-x)) / x, with its series near
     return bern(x) * (1.0 - bern(-x)) / x;
 }
 double softplus(double x) { return std::max(x, 0.0) + std::log(1.0 + std::exp(-std::abs(x))); }
-double sigm(double x) { return 0.5 * (1.0 + std::tanh(0.5 * x)); }
+// 1/(1 + e^-x) without cancellation for either sign (use sigm(-x) for 1 - sigm(x))
+double sigm(double x) {
+    const double e = std::exp(-std::abs(x));
+    return x >= 0.0 ? 1.0 / (1.0 + e) : e / (1.0 + e);
+}
 
 struct Params {
     std::string particle_model = "uniform";
@@ -683,18 +687,18 @@ struct Model {
     // ---- corrected mode (log variables; docs/model.md section 8) ----
     // Butler-Volmer: i_n and d i_n / d(u, phi1, phi2, s); agg selects the agglomerate OCP fit and c_s,max
     void log_rate(const double* x, bool agg, double csmax_agg, double& i, double di[NV]) const {
-        const double rtf = p.R * p.T / p.F, ff = 1.0 / rtf, th = sigm(x[ICS]), xx = 2 * th - 1;
+        const double rtf = p.R * p.T / p.F, ff = 1.0 / rtf, th = sigm(x[ICS]), om = sigm(-x[ICS]), xx = 2 * th - 1;
         const double uref = agg ? 3.8637058886774844 : 3.8685682447595453, csm = agg ? csmax_agg : cs_max();
         const int nk = agg ? 12 : 11;
         double rk = 0.0, drk = 0.0;
         for (int k = 0; k < nk; ++k) {
             const double a = agg ? AK_AGG[k] : AK_UNIFORM[k];
-            rk = rk + a * (powi(xx, k + 1) - (2 * th * k * (1 - th)) / powi(xx, 1 - k));
+            rk = rk + a * (powi(xx, k + 1) - (2 * th * k * om) / powi(xx, 1 - k));
             double term = 2.0 * (2 * k + 1) * powi(xx, k);
-            if (k >= 2) term = term - 4.0 * k * (k - 1) * th * (1 - th) * powi(xx, k - 2);
+            if (k >= 2) term = term - 4.0 * k * (k - 1) * th * om * powi(xx, k - 2);
             drk = drk + a * term;
         }
-        const double dU_ds = -rtf + drk * th * (1 - th);
+        const double dU_ds = -rtf + drk * th * om;
         const double ln_i0 = std::log(p.F * p.k_rxn * std::pow(p.c_bulk, p.alpha_a) * std::pow(csm, p.alpha_a + p.alpha_c))
                              + p.alpha_a * x[IC] - p.alpha_a * softplus(x[ICS]) - p.alpha_c * softplus(-x[ICS]);
         const double eta = x[IP1] - x[IP2] - (uref + rtf * (x[IC] - x[ICS]) + rk);
@@ -704,7 +708,7 @@ struct Model {
         di[IC] = i * p.alpha_a - di_deta * rtf;
         di[IP1] = di_deta;
         di[IP2] = -di_deta;
-        di[ICS] = i * (-p.alpha_a * th + p.alpha_c * (1 - th)) - di_deta * dU_ds;
+        di[ICS] = i * (-p.alpha_a * th + p.alpha_c * om) - di_deta * dU_ds;
     }
     // face fluxes (N+, i1, i2) from xa to xb (Scharfetter-Gummel) and derivatives dFa, dFb [3][NV];
     // g = eps/(tau h), gs = (1-eps) sigma/h
@@ -806,7 +810,7 @@ struct Model {
                 const double th = sigm(X(j, ICS)), tho = sigm(xold[static_cast<std::size_t>(j) * NV + ICS]);
                 Rr(j, ICS) = vf_AM * cs_max() * (th - tho) / dt + a * i / F;
                 for (int v = 0; v < NV; ++v) blk(B, j, ICS, v) = a * di[v] / F;
-                blk(B, j, ICS, ICS) += vf_AM * cs_max() * th * (1 - th) / dt;
+                blk(B, j, ICS, ICS) += vf_AM * cs_max() * th * sigm(-X(j, ICS)) / dt;
             }
         }
         for (std::size_t q = 0; q < G.size(); ++q) G[q] = -R[q];
@@ -839,7 +843,7 @@ double phys_update(const std::vector<double>& x, const std::vector<double>& d, b
         u = std::max({u, std::exp(x[q + IC]) * std::abs(d[q + IC]), std::abs(d[q + IP1]), std::abs(d[q + IP2])});
         if (!frozen_s) {
             const double th = sigm(x[q + ICS]);
-            u = std::max(u, th * (1 - th) * std::abs(d[q + ICS]));
+            u = std::max(u, th * sigm(-x[q + ICS]) * std::abs(d[q + ICS]));
         }
     }
     return u;
@@ -1354,7 +1358,7 @@ struct AggCorrected {
                 const double th = sigm(x[ICS]), tho = sigm(ca_old[q * NV + ICS]);
                 Rr[ICS] = (1.0 - ea) * csmax_a * (th - tho) / h + a_x * i / F;
                 for (int v = 0; v < NV; ++v) Bt(ICS, v) = a_x * di[v] / F;
-                Bt(ICS, ICS) += (1.0 - ea) * csmax_a * th * (1 - th) / h;
+                Bt(ICS, ICS) += (1.0 - ea) * csmax_a * th * sigm(-x[ICS]) / h;
                 for (int r = 0; r < NV; ++r) Gq[q * NV + r] = -Rr[r];
             }
         }
