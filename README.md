@@ -1,5 +1,7 @@
 # nmc111-model
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23093184.svg)](https://doi.org/10.5281/zenodo.23093184)
+
 A one-dimensional model of an NMC111 half cell (lithium foil | separator | porous NMC111 cathode | current collector) with two particle models, solved with [bandsolver](https://github.com/jcbernard87/bandsolver), an implementation of Newman's BAND method.
 
 - **Uniform particles** (`particle_model = 'uniform'`): each electrode node holds uniform-concentration particles.
@@ -94,4 +96,4 @@ The public tests compute everything they need. They cover cross-language agreeme
 
 ## License and citation
 
-BSD 3-Clause; see [LICENSE](LICENSE). See [CITATION.cff](CITATION.cff); GitHub's "Cite this repository" button uses it. If you use this model, please also cite [bandsolver](https://github.com/jcbernard87/bandsolver) and Newman's method: J. Newman, *Ind. Eng. Chem. Fundam.* 7, 514 (1968); J. Newman and K. E. Thomas-Alyea, *Electrochemical Systems*, 3rd ed., Appendix C.
+BSD 3-Clause; see [LICENSE](LICENSE). See [CITATION.cff](CITATION.cff); GitHub's "Cite this repository" button uses it. Archived on Zenodo: [doi:10.5281/zenodo.23093184](https://doi.org/10.5281/zenodo.23093184), which resolves to the latest version. Version 0.1.0 is [doi:10.5281/zenodo.23093185](https://doi.org/10.5281/zenodo.23093185). If you use this model, please also cite [bandsolver](https://github.com/jcbernard87/bandsolver) and Newman's method: J. Newman, *Ind. Eng. Chem. Fundam.* 7, 514 (1968); J. Newman and K. E. Thomas-Alyea, *Electrochemical Systems*, 3rd ed., Appendix C.

@@ -10,6 +10,14 @@ authors:
 version: 0.1.0
 date-released: 2026-10-01
 license: BSD-3-Clause
+doi: 10.5281/zenodo.23093184
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.23093184
+    description: Concept DOI (all versions; resolves to the latest)
+  - type: doi
+    value: 10.5281/zenodo.23093185
+    description: Version 0.1.0
 repository-code: "https://github.com/jcbernard87/nmc111-model"
 url: "https://github.com/jcbernard87/nmc111-model"
 abstract: >-
