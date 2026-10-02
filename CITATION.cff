@@ -8,7 +8,7 @@ authors:
   - given-names: John
     family-names: Bernard
 version: 0.1.0
-date-released: 2026-09-29
+date-released: 2026-10-01
 license: BSD-3-Clause
 repository-code: "https://github.com/jcbernard87/nmc111-model"
 url: "https://github.com/jcbernard87/nmc111-model"
