@@ -1600,7 +1600,6 @@ int main(int argc, char** argv) {
                 const double min_dt = 1.0e-10, event_dv = 1.0e-4, event_min_dt = 1.0e-12;
                 const int max_failures = 200;  // Newton failures allowed within one step
                 int failures = 0;
-                const std::vector<double> c_begin = c, ca_begin = ca;
                 double hh = dtt;
                 t_done = 0.0;
                 stopped = false;
@@ -1609,15 +1608,17 @@ int main(int argc, char** argv) {
                     const std::vector<double> c_save = c, ca_save = ca;
                     if (!newton_step(hh)) {
                         if (hh / 2 < min_dt || ++failures >= max_failures) {
-                            c = c_begin;  // give up: report the state at the start of the step
-                            ca = ca_begin;
+                            c = c_save;  // give up: keep the last converged sub-step (t_done advanced to it)
+                            ca = ca_save;
                             return false;
                         }
                         hh = hh / 2;
                         continue;
                     }
                     if (check) {
-                        const double vv = cell_voltage(), mg = std::min(vv - vlo, vhi - vv);
+                        // a discharge ends at vlo, a charge at vhi (the other bound is not its cutoff)
+                        const double vv = cell_voltage();
+                        const double mg = m.i_app > 0 ? vv - vlo : m.i_app < 0 ? vhi - vv : std::min(vv - vlo, vhi - vv);
                         if (mg < 0.0) {
                             if (mg < -event_dv && hh / 2 >= event_min_dt) { c = c_save; ca = ca_save; hh = hh / 2; continue; }
                             t_done = t_done + hh;
@@ -1741,7 +1742,15 @@ int main(int argc, char** argv) {
                         why = stopped && cell_voltage() <= st.Vmin ? "cutoff_low" : "cutoff_high";
                     }
                     m.i_app = I;
-                    if (!ok) { write_row(false, step_no); exit_reason = limit_reason(); finished = false; break; }
+                    if (!ok) {
+                        // keep the sub-steps completed before the failure: the limit is judged where it was reached
+                        if (st.kind != Kind::cv && h_done > 0.0) {
+                            mAhg = mAhg + 1000.0 * (I / m.mass_area) * h_done / 3600.0;
+                            t = t + h_done;
+                            ++n_done;
+                        }
+                        write_row(false, step_no); exit_reason = limit_reason(); finished = false; break;
+                    }
                     mAhg = mAhg + 1000.0 * (I / m.mass_area) * h_done / 3600.0;
                     t = t + h_done;
                     t_step = t_step + h_done;

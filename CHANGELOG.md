@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Driver fixes** (corrected mode, both models, all three languages): a cc discharge ends only at its `Vmin` and a charge only at its `Vmax`, as documented (both bounds were applied, so a step starting beyond the other bound stopped at once as a cutoff); when a time step cannot be solved, the exit row is the last converged sub-step, not the state at the start of the time step (the capacity of the partial step was lost). Faithful mode is unchanged. Found while porting the Zn/MnO₂ model.
+
 ## 0.1.0 (2026-10-01)
 
 First public version.

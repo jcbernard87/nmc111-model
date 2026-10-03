@@ -421,6 +421,12 @@ contains
                 end if
                 i_app = I
                 if (.not. ok) then
+                    ! keep the sub-steps completed before the failure: the limit is judged where it was reached
+                    if (skind(k) /= K_CV .and. h_done > 0.0_dp) then
+                        mAhg = mAhg + 1000.0_dp*(I/mass_area)*h_done/3600.0_dp
+                        time = time + h_done
+                        nsteps_done = nsteps_done + 1
+                    end if
                     call write_row_c(.false., k)
                     exit_reason = limit_reason()
                     nsolve = nsteps_done
@@ -864,24 +870,23 @@ contains
     subroutine advance(dt, t_done, stopped, ok, check, vlo, vhi)
         !! Advance by dt at the current i_app, halving the sub-step on Newton failure. With `check`,
         !! a sub-step that crosses a voltage cutoff by more than 0.1 mV is halved, so the step ends
-        !! within 0.1 mV of the cutoff (see simulate.advance in Python).
+        !! within 0.1 mV of the cutoff (see driver.advance in Python). A cc discharge ends at vlo, a charge
+        !! at vhi. On giving up (ok = .false.), c is the last converged sub-step and t_done the time to it.
         real(dp), intent(in) :: dt, vlo, vhi
         logical, intent(in) :: check
         real(dp), intent(out) :: t_done
         logical, intent(out) :: stopped, ok
         real(dp), parameter :: min_dt = 1.0e-10_dp, event_dv = 1.0e-4_dp, event_min_dt = 1.0e-12_dp
-        real(dp) :: hh, vv, mg, c_save(NV,nj), c_begin(NV,nj)
-        real(dp), allocatable :: cag_save(:,:,:), cag_begin(:,:,:)
+        real(dp) :: hh, vv, mg, c_save(NV,nj)
+        real(dp), allocatable :: cag_save(:,:,:)
         integer, parameter :: max_failures = 200     ! Newton failures allowed within one step
         integer :: failures
         logical :: good
         if (aggc) then
-            allocate(cag_save(NV,na,nl), cag_begin(NV,na,nl))
-            cag_begin = cag
+            allocate(cag_save(NV,na,nl))
         else
-            allocate(cag_save(NV,0,0), cag_begin(NV,0,0))
+            allocate(cag_save(NV,0,0))
         end if
-        c_begin = c
         t_done = 0.0_dp
         hh = dt
         failures = 0
@@ -896,8 +901,8 @@ contains
                 failures = failures + 1
                 if (hh/2 < min_dt .or. failures >= max_failures) then
                     ok = .false.
-                    c = c_begin                ! give up: report the state at the start of the step
-                    if (aggc) cag = cag_begin
+                    c = c_save                 ! give up: keep the last converged sub-step
+                    if (aggc) cag = cag_save
                     return
                 end if
                 hh = hh/2
@@ -905,7 +910,13 @@ contains
             end if
             if (check) then
                 vv = cell_voltage()
-                mg = min(vv - vlo, vhi - vv)
+                if (i_app > 0) then
+                    mg = vv - vlo
+                else if (i_app < 0) then
+                    mg = vhi - vv
+                else
+                    mg = min(vv - vlo, vhi - vv)
+                end if
                 if (mg < 0.0_dp) then
                     if (mg < -event_dv .and. hh/2 >= event_min_dt) then
                         c = c_save

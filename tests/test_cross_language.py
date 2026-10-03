@@ -119,3 +119,44 @@ def test_drained_agglomerates_reach_the_cutoff_in_every_language(fortran_exe, cp
     r.write(p)
     assert_same(outs[0], p)
     assert_same(outs[1], p)
+
+
+# ------------------------------------------------------------------ driver: cutoffs and failures
+def _last_time_voltage(path):
+    """(time [h], voltage [V]) of the last row (two header lines; columns State, Time, Voltage, ...)."""
+    tok = path.read_text().splitlines()[-1].split()
+    return float(tok[1]), float(tok[2])
+
+
+def _uniform(which, steps, fortran_exe, cpp_exe, run_native, tmp_path, name):
+    if which == "python":
+        r = run_uniform(Params(mode="corrected", steps=steps))
+        out = tmp_path / f"{name}.txt"
+        r.write(out)
+        return out, r.exit_reason
+    exe = fortran_exe if which == "fortran" else cpp_exe
+    if exe is None:
+        pytest.skip(f"{which} not built")
+    groups = {"numerics": {"mode": "corrected"}, "protocol": {"steps": steps}}
+    return run_native(exe, groups, name=f"{which}_{name}.txt"), None
+
+
+@pytest.mark.parametrize("which", ["python", "fortran", "cpp"])
+def test_discharge_ignores_its_upper_bound(fortran_exe, cpp_exe, run_native, tmp_path, which):
+    """A discharge ends at Vmin only: an upper bound below the starting voltage does not stop it
+    (the drivers applied both bounds to every cc step and stopped it at once as cutoff_high)."""
+    out, reason = _uniform(which, "cc C=1 Vmax=3.5", fortran_exe, cpp_exe, run_native, tmp_path, "bound")
+    assert reason in (None, "cutoff_low")
+    assert _last_time_voltage(out)[1] == pytest.approx(2.5, abs=1e-4)
+
+
+@pytest.mark.parametrize("which", ["python", "fortran", "cpp"])
+def test_a_physical_limit_keeps_the_progress_of_its_last_step(fortran_exe, cpp_exe, run_native, tmp_path, which):
+    """When a step cannot be completed (here the particles fill at 5C), the exit row is the last converged
+    sub-step, inside the time step (the drivers reported the state at its start, a whole number of dt)."""
+    out, reason = _uniform(which, "cc C=5 Vmin=0.5", fortran_exe, cpp_exe, run_native, tmp_path, "limit")
+    assert reason in (None, "particles_full")
+    dt = Params(mode="corrected").dt
+    t_h = _last_time_voltage(out)[0]                          # printed in hours to 5 decimals
+    grid_h = round(t_h * 3600.0 / dt) * dt / 3600.0
+    assert abs(t_h - grid_h) > 2e-5

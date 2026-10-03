@@ -74,9 +74,10 @@ def advance(stepper, state, dt: float, I: float, *, margin=None):
         h = min(h, dt - t_done)
         try:
             new = stepper.newton_step(state, h, I)
-        except SolverFailure:
+        except SolverFailure as e:
             failures += 1
             if h / 2 < MIN_SUBSTEP or failures >= MAX_FAILURES:
+                e.state, e.t_done = state, t_done        # the progress made before giving up
                 raise
             h = h / 2
             continue
@@ -202,11 +203,16 @@ def run_protocol(stepper, *, max_steps: Optional[int] = None, result=None) -> Pr
                     margin = None
                     if st.kind == "cc":
                         def margin(sn, I=I, st=st):
+                            # a discharge ends at Vmin, a charge at Vmax (the other bound is not its cutoff)
                             v = stepper.voltage(sn, I)
-                            return min(v - st.Vmin, st.Vmax - v)
+                            return v - st.Vmin if I > 0 else (st.Vmax - v if I < 0 else min(v - st.Vmin, st.Vmax - v))
                     new, h_done, stopped = advance(stepper, state, h, I, margin=margin)
                     why = "cutoff_low" if stopped and stepper.voltage(new, I) <= st.Vmin else "cutoff_high"
-            except SolverFailure:
+            except SolverFailure as e:
+                # keep the sub-steps completed before the failure: the limit is judged where it was reached
+                if getattr(e, "t_done", 0.0) > 0.0:
+                    mAhg = mAhg + 1000.0 * (I / p.mass_area) * e.t_done / 3600.0
+                    state, t, n_done = e.state, t + e.t_done, n_done + 1
                 why = getattr(stepper, "limit_reason", lambda s: None)(state)
                 return finish(why or "solver_fail", k, I)
             mAhg = mAhg + 1000.0 * (I / p.mass_area) * h_done / 3600.0
