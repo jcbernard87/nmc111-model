@@ -3,7 +3,7 @@
 ## Unreleased
 
 - **Fix (D-20):** the OCP's Redlich-Kister sum evaluated 0/0 at θ = 1/2 exactly, so U was NaN there and a corrected run started at θ = 1/2 stopped at once (all three languages). Corrected mode evaluates the k = 0 term as 2θ − 1 alone; output elsewhere is bit-identical. Faithful mode keeps the original's arithmetic.
-- **Input checks:** mesh sizes are validated (`sep_node` ≥ 3, `nj` − `sep_node` ≥ 3, `nja` ≥ 4); the Fortran program rejects unknown namelist groups (it skipped them silently) and names the offending entry; the C++ program rejects a name in the wrong group (it accepted any group); Python rejects a misspelled `mode` for the agglomerate model too. Messages agree across the three languages.
+- **Input checks:** mesh sizes are validated (`sep_node` ≥ 3, `nj` − `sep_node` ≥ 3, `nja` ≥ 4); the Fortran program rejects unknown namelist groups (it skipped them silently) and names the offending entry; the C++ program rejects a name in the wrong group (it accepted any group); Python rejects a misspelled `mode` for the agglomerate model too; all three reject a group that appears twice (Fortran read the first, C++ merged them, Python kept the last). Messages agree across the three languages.
 
 ## 0.2.0 (2026-10-04)
 

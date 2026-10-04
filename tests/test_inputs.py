@@ -70,6 +70,7 @@ BAD = [
     ("&model\n  particle_model = 'agglomerate'\n/\n&agglomerate\n  nja = 3\n/\n", "nja must be at least 4"),
     ("&initial\n  cs_init = 0.01\n/\n", "unknown namelist group &initial"),
     ("&cell\n  cs_init = 0.01\n/\n", ("cs_init", "&cell")),          # a name in the wrong group
+    ("&cell\n  nj = 30\n/\n&cell\n  nj = 40\n/\n", "namelist group &cell appears twice"),
 ]
 
 

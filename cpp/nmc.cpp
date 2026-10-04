@@ -305,8 +305,10 @@ Params read_input(const std::string& path) {
     };
     const std::regex group(R"(&(\w+)([\s\S]*?)/)");
     const std::regex entry(R"((\w+)\s*=\s*('[^']*'|"[^"]*"|[^,\s/]+))");
+    std::set<std::string> seen_groups;
     for (std::sregex_iterator g(text.begin(), text.end(), group), end; g != end; ++g) {
         const std::string gname = lower((*g)[1]);
+        if (!seen_groups.insert(gname).second) throw std::runtime_error("namelist group &" + gname + " appears twice");
         const auto gi = groups.find(gname);
         if (gi == groups.end()) throw std::runtime_error("unknown namelist group &" + gname);
         const std::string body = (*g)[2];

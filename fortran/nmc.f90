@@ -640,15 +640,17 @@ contains
     end subroutine read_input
 
     subroutine check_groups(u)
-        !! Every &group in the file must be one of the program's namelist groups (a misspelled group would
-        !! otherwise be skipped silently).
+        !! Every &group in the file must be one of the program's namelist groups, and appear once (a misspelled
+        !! group would otherwise be skipped silently, and only the first of two groups with one name read).
         integer, intent(in) :: u
         character(len=12), parameter :: known(10) = [character(len=12) :: 'model', 'cell', 'electrolyte', &
             'active', 'constants', 'operation', 'numerics', 'protocol', 'output', 'agglomerate']
         character(len=1024) :: line
         character(len=64) :: name
         character(len=1) :: quote
-        integer :: ios, i, j
+        logical :: seen(10)
+        integer :: ios, i, j, g
+        seen = .false.
         rewind(u)
         do
             read(u, '(A)', iostat=ios) line
@@ -669,10 +671,16 @@ contains
                         j = j + 1
                     end do
                     name = lower(line(i+1:j-1))
-                    if (.not. any(known == name)) then
+                    g = findloc(known, name, 1)
+                    if (g == 0) then
                         write(error_unit,'(A)') 'unknown namelist group &'//trim(name)
                         error stop 2
                     end if
+                    if (seen(g)) then                ! only the first of two would be read
+                        write(error_unit,'(A)') 'namelist group &'//trim(name)//' appears twice'
+                        error stop 2
+                    end if
+                    seen(g) = .true.
                     i = j - 1
                 end if
                 i = i + 1

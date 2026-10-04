@@ -76,6 +76,8 @@ def parse(text: str) -> dict:
             name, raw = part.group(1).lower(), part.group(2)
             quoted = raw[:1] in "'\""
             entries[name] = _value(raw[1:-1] if quoted else raw, quoted)
+        if group in out:
+            raise ValueError(f"namelist group &{group} appears twice")
         out[group] = entries
     return out
 
