@@ -208,3 +208,22 @@ def test_sigmoid_keeps_precision_at_the_limits():
         assert sigmoid(s) == pytest.approx(math.exp(s), rel=1e-12)
         assert sigmoid(-s) == 1.0
     assert sigmoid(0.0) == 0.5
+
+
+def test_rest_relaxes_monotonically():
+    """After a 2C partial discharge the voltage rises monotonically during a rest, and the gradients inside
+    the agglomerates (theta and the pore electrolyte) decay to round-off: a coupling or sign error would show
+    as an overshoot or oscillation (#7). Measured spreads: theta 1.8e-4 and ln(c/c_bulk) 1.4e-3 at the end of
+    the discharge, 3e-16 after 1800 s."""
+    from nmc_model.logcore import S, U, sigmoid
+
+    def spreads(st):
+        th, u = sigmoid(st.ca[..., S]), st.ca[..., U]
+        return float(np.max(th.max(axis=1) - th.min(axis=1))), float(np.max(u.max(axis=1) - u.min(axis=1)))
+
+    before = spreads(run_corrected(params(steps="cc C=2 t=900")).final_state)
+    r = run_corrected(params(steps="cc C=2 t=900; rest t=1800"))
+    v = np.array([row[2] for row in r.rows if row[8] == 2])
+    assert len(v) > 10 and np.all(np.diff(v) >= -1e-9), np.diff(v).min()
+    after = spreads(r.final_state)
+    assert min(before) > 1e-5 and max(after) < 1e-9, (before, after)
