@@ -49,6 +49,7 @@ def limit_reason(c_min: float, c_bulk: float, theta_min: float, theta_max: float
     return None
 EVENT_MIN_DT = 1.0e-12  # ... or this sub-step length [s]
 CV_TOL = 1.0e-9        # [V]
+CV_ACCEPT = 1.0e-6     # [V] a collapsed bracket is accepted only this close to the set voltage
 
 
 @dataclass
@@ -147,7 +148,9 @@ def cv_step(stepper, state, h: float, V_set: float, I_guess: float):
             I = 0.5 * (a + b)
         fI = f(I)
         if abs(fI) <= CV_TOL or (b - a) <= 1.0e-14 * p.i_1C:
-            if I in states:
+            # a collapsed bracket can sit on the edge of the currents for which a step converges, next
+            # to a state far from V_set: accept only a state on the set voltage
+            if I in states and abs(fI) <= CV_ACCEPT:
                 return states[I], I
             raise SolverFailure("constant-voltage step: no feasible current at the set voltage")
         if fI > 0:

@@ -240,7 +240,10 @@ class CorrectedModel:
                 raise SolverFailure(f"electrode solve: {e}") from e
             dca = dxa0 + np.einsum("lnkc,lc->lnk", Z, dce[self.nodes, :3])
             lam = bounded((dce, dca))
-            raw = max(float(np.max(np.abs(dce))), float(np.max(np.abs(dca))))
+            # divergence is judged on the damped electrode update: near theta = 0 or 1 a linearized log-odds
+            # update of the agglomerates is legitimately huge, and through the condensation it also inflates
+            # the undamped electrode update; `bounded` scales both down
+            raw = lam * float(np.max(np.abs(dce)))
             st = AggState(st.c + lam * dce, st.ca + lam * dca)
             upd = max(physical_update(st.c, dce, frozen_s=True), physical_update(st.ca, dca))
             if history is not None:

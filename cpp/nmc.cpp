@@ -1433,9 +1433,12 @@ struct AggCorrected {
                 }
             }
             const double lam = std::min(lbounded(dce), lbounded(dca));
+            // divergence is judged on the damped electrode update: near theta = 0 or 1 a linearized log-odds
+            // update of the agglomerates is legitimately huge, and through the condensation it also inflates
+            // the undamped electrode update; the step limit scales both down
             double raw = 0.0;
             for (double v : dce) raw = std::max(raw, std::abs(v));
-            for (double v : dca) raw = std::max(raw, std::abs(v));
+            raw = lam * raw;
             for (std::size_t q = 0; q < c.size(); ++q) c[q] = c[q] + lam * dce[q];
             for (std::size_t q = 0; q < ca.size(); ++q) ca[q] = ca[q] + lam * dca[q];
             const double upd = std::max(phys_update(c, dce, true), phys_update(ca, dca, false));
@@ -1695,8 +1698,11 @@ int main(int argc, char** argv) {
                     }
                     fI = f(I, good);
                     if (std::abs(fI) <= tol || (b - a) <= 1.0e-14 * m.i_1C) {
-                        if (!good) { c = c_start; ca = ca_start; }
-                        return good;
+                        // a collapsed bracket can sit on the edge of the currents for which a step converges,
+                        // next to a state far from V_set: accept only a state on the set voltage
+                        const bool accept = good && std::abs(fI) <= 1.0e-6;
+                        if (!accept) { c = c_start; ca = ca_start; }
+                        return accept;
                     }
                     if (fI > 0) {
                         a = I; fa = fI;
