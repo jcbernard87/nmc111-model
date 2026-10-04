@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-10-04)
 
 - **Driver fixes** (corrected mode, both models, all three languages): a cc discharge ends only at its `Vmin` and a charge only at its `Vmax`, as documented (both bounds were applied, so a step starting beyond the other bound stopped at once as a cutoff); when a time step cannot be solved, the exit row is the last converged sub-step, not the state at the start of the time step (the capacity of the partial step was lost). Faithful mode is unchanged. Found while porting the Zn/MnO₂ model.
 - **Constant voltage** (corrected mode, both models, all three languages): a collapsed current bracket is accepted only within 10⁻⁶ V of the set voltage (#1); a CV step proceeds in sub-steps when no current holds the voltage for a whole time step (#3): a 4.2 V hold right after a 2C discharge stopped with `particles_full` and now runs to its current limit. The agglomerate Newton judges divergence on the damped electrode update (#2).
