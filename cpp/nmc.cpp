@@ -1718,6 +1718,26 @@ int main(int argc, char** argv) {
                 ca = ca_start;
                 return false;
             };
+            // a constant-voltage sub-step: cv_step over h, halved (down to 1e-10 s) while no current holds V_set
+            // for that long; on failure c, ca and I are as on entry and h_done = 0
+            auto cv_advance = [&](double h, double V_set, double& I, double& h_done) {
+                const double I_guess = I;
+                const std::vector<double> c_begin = c, ca_begin = ca;
+                h_done = h;
+                while (true) {
+                    c = c_begin;
+                    ca = ca_begin;
+                    I = I_guess;
+                    if (cv_step(h_done, V_set, I)) return true;
+                    if (h_done / 2 < 1.0e-10) break;
+                    h_done = h_done / 2;
+                }
+                c = c_begin;
+                ca = ca_begin;
+                I = I_guess;
+                h_done = 0.0;
+                return false;
+            };
 
             double I = steps[0].kind == Kind::cc ? steps[0].C * m.i_1C : 0.0;
             m.i_app = I;
@@ -1738,8 +1758,7 @@ int main(int argc, char** argv) {
                     bool stopped = false, ok;
                     std::string why;
                     if (st.kind == Kind::cv) {
-                        ok = cv_step(h, st.V, I);
-                        h_done = h;
+                        ok = cv_advance(h, st.V, I, h_done);
                         stopped = st.Imin >= 0 && std::abs(I) <= st.Imin * m.i_1C;
                         why = "current_limit";
                     } else {

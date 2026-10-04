@@ -160,3 +160,15 @@ def test_a_physical_limit_keeps_the_progress_of_its_last_step(fortran_exe, cpp_e
     t_h = _last_time_voltage(out)[0]                          # printed in hours to 5 decimals
     grid_h = round(t_h * 3600.0 / dt) * dt / 3600.0
     assert abs(t_h - grid_h) > 2e-5
+
+
+@pytest.mark.parametrize("which", ["python", "fortran", "cpp"])
+def test_cv_hold_after_a_discharge_proceeds_in_sub_steps(fortran_exe, cpp_exe, run_native, tmp_path, which):
+    """A 4.2 V hold right after a 2C discharge cannot be held for whole time steps at first; it proceeds in
+    sub-steps and ends on the current limit (without sub-stepping it stopped with particles_full, #3)."""
+    out, reason = _uniform(which, "cc C=2 Vmin=2.5; cv V=4.2 Imin=0.05", fortran_exe, cpp_exe, run_native,
+                           tmp_path, "cvsub")
+    assert reason in (None, "end_of_protocol")
+    tok = out.read_text().splitlines()[-1].split()
+    assert float(tok[2]) == pytest.approx(4.2, abs=1e-6)                               # voltage held
+    assert abs(float(tok[7])) <= 0.05 * Params(mode="corrected").i_1C * 1e3 * (1 + 1e-9)  # current at the limit

@@ -166,6 +166,19 @@ def cv_step(stepper, state, h: float, V_set: float, I_guess: float):
     raise SolverFailure("constant-voltage current iteration did not converge")
 
 
+def cv_advance(stepper, state, h: float, V_set: float, I_guess: float):
+    """A constant-voltage sub-step: cv_step over h, halved (down to MIN_SUBSTEP) while no current holds V_set
+    for that long. Returns (state, I, time advanced); the protocol continues the hold from there."""
+    while True:
+        try:
+            new, I = cv_step(stepper, state, h, V_set, I_guess)
+            return new, I, h
+        except SolverFailure:
+            if h / 2 < MIN_SUBSTEP:
+                raise
+            h = h / 2
+
+
 def run_protocol(stepper, *, max_steps: Optional[int] = None, result=None) -> ProtocolResult:
     """Run the protocol p.steps (repeated p.cycles times)."""
     p = stepper.p
@@ -198,8 +211,7 @@ def run_protocol(stepper, *, max_steps: Optional[int] = None, result=None) -> Pr
             h = dt if st.t is None else min(dt, st.t - t_step)
             try:
                 if st.kind == "cv":
-                    new, I = cv_step(stepper, state, h, st.V, I)
-                    h_done = h
+                    new, I, h_done = cv_advance(stepper, state, h, st.V, I)
                     stopped = st.Imin is not None and abs(I) <= st.Imin * p.i_1C
                     why = "current_limit"
                 else:
