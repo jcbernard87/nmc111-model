@@ -42,9 +42,7 @@ jobs:
           done
 
   windows:
-    # experimental until its first green run, then drop continue-on-error
     runs-on: windows-latest
-    continue-on-error: true
     defaults:
       run:
         shell: bash
