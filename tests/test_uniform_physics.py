@@ -10,7 +10,6 @@ import bandsolver
 from nmc_model.uniform import kinetics
 from nmc_model.uniform.model import Assembler, make_mesh
 from nmc_model.uniform.params import Params
-from nmc_model.logcore import Transport
 from nmc_model.uniform.logmodel import LogUniformModel
 from nmc_model.uniform.simulate import initial_state, run
 
@@ -93,7 +92,8 @@ def test_jacobian_faithful_shows_D1(mid_discharge):
     """The Li-foil solid-potential row has the wrong sign in faithful mode (D-1)."""
     pc, x_old, x = mid_discharge
     c_old, c = to_physical(pc, x_old), to_physical(pc, x)
-    chk = bandsolver.check_jacobian(_fill(Assembler(Params.faithful(k_rxn=FAITHFUL_K, sigma=0.1, C_rate=1.0)), c_old), c)
+    asm = Assembler(Params.faithful(k_rxn=FAITHFUL_K, sigma=0.1, C_rate=1.0))
+    chk = bandsolver.check_jacobian(_fill(asm, c_old), c)
     name, worst = chk.worst()
     assert (name, worst.node, worst.row, worst.col) == ("B", 0, 1, 1)
     assert worst.user == pytest.approx(-worst.fd, rel=1e-6)

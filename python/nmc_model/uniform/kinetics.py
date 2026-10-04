@@ -91,7 +91,8 @@ def _power_reg(x, alpha, delta):
         u = x / delta
         lo = x < delta
         g = np.where(lo, delta ** alpha * ((2.0 - alpha) * u + (alpha - 1.0) * u * u), x ** alpha)
-        dg = np.where(lo, delta ** (alpha - 1.0) * ((2.0 - alpha) + 2.0 * (alpha - 1.0) * u), alpha * x ** (alpha - 1.0))
+        dg = np.where(lo, delta ** (alpha - 1.0) * ((2.0 - alpha) + 2.0 * (alpha - 1.0) * u),
+                      alpha * x ** (alpha - 1.0))
     return g, dg
 
 

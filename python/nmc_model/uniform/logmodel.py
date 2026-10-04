@@ -14,7 +14,8 @@ import numpy as np
 import bandsolver
 
 from ..driver import SolverFailure
-from ..logcore import DIVERGED, physical_update, N, P1, P2, S, U, Electrode, LogKinetics, Transport, bounded, converged, equilibrate, logit
+from ..logcore import (DIVERGED, physical_update, N, P1, P2, S, U, Electrode, LogKinetics, Transport, bounded,
+                       converged, equilibrate, logit)
 from ..logcore import sigmoid
 from . import kinetics
 from .model import make_mesh

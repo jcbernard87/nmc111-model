@@ -9,7 +9,6 @@ Requires bandsolver built without FMA contraction (see docs/validation.md).
 """
 from pathlib import Path
 
-import pytest
 
 from nmc_model.agglomerate import run
 

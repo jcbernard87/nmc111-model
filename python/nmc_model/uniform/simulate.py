@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -18,7 +17,7 @@ import bandsolver
 from . import kinetics
 from .model import Assembler, C, CS, P1, P2
 from .params import Params, f32
-from ..driver import SolverFailure, limit_reason as driver_limit, run_protocol
+from ..driver import limit_reason as driver_limit, run_protocol
 
 HEADER = ("State", "Time", "Voltage", "Equivalence", "Anode_Eta", "anode_exchange_c", "Edge_c0")
 UNITS = ("CDR", "hours", "Volts", "electron_equivs", "mV", "mA/cm2", "mol/cm3")

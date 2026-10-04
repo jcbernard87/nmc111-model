@@ -33,7 +33,10 @@ def _agg_dirs():
     return dirs
 
 
-@pytest.mark.parametrize("exe_var,default", [("NMC_FORTRAN_EXE", "build/fortran/nmc_f"), ("NMC_CPP_EXE", "build/cpp/nmc_cpp")])
+EXES = [("NMC_FORTRAN_EXE", "build/fortran/nmc_f"), ("NMC_CPP_EXE", "build/cpp/nmc_cpp")]
+
+
+@pytest.mark.parametrize("exe_var,default", EXES)
 @pytest.mark.parametrize("run_dir", _agg_dirs(), ids=lambda d: d.name[:40])
 def test_agglomerate_byte_identical(run_dir, exe_var, default, tmp_path):
     exe = _exe(exe_var, default)
@@ -44,7 +47,7 @@ def test_agglomerate_byte_identical(run_dir, exe_var, default, tmp_path):
     assert (tmp_path / "tv.txt").read_bytes() == (run_dir / "Time_Voltage.txt").read_bytes()
 
 
-@pytest.mark.parametrize("exe_var,default", [("NMC_FORTRAN_EXE", "build/fortran/nmc_f"), ("NMC_CPP_EXE", "build/cpp/nmc_cpp")])
+@pytest.mark.parametrize("exe_var,default", EXES)
 def test_uniform_byte_identical(oracle_dir, exe_var, default, tmp_path):
     exe = _exe(exe_var, default)
     if exe is None:

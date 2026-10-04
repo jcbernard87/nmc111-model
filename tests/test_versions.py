@@ -1,4 +1,5 @@
-"""Every version string agrees: pyproject.toml, the package, CITATION.cff, CMakeLists.txt and the newest CHANGELOG heading."""
+"""Every version string agrees: pyproject.toml, the package, CITATION.cff, CMakeLists.txt and the newest numbered
+CHANGELOG heading."""
 import re
 from pathlib import Path
 

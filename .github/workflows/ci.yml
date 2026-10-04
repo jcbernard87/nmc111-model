@@ -29,6 +29,10 @@ jobs:
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
           cmake --build build
+      - name: Lint
+        run: |
+          python -m pip install ruff
+          ruff check python tests scripts private_checks
       - name: Tests
         run: python -m pytest -q
       - name: Execute notebooks
@@ -36,3 +40,35 @@ jobs:
           for nb in notebooks/*.ipynb; do
             jupyter nbconvert --to notebook --execute "$nb" --output-dir "$RUNNER_TEMP" --ExecutePreprocessor.timeout=900
           done
+
+  windows:
+    # experimental until its first green run, then drop continue-on-error
+    runs-on: windows-latest
+    continue-on-error: true
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: fortran-lang/setup-fortran@v1
+        with:
+          compiler: gcc
+          version: 13
+      - name: Install bandsolver and this package
+        run: |
+          python -m pip install --upgrade pip
+          # the release's Windows wheel (a source build needs Intel Fortran with MSVC, as bandsolver's CI uses)
+          python -m pip install "https://github.com/jcbernard87/bandsolver/releases/download/v0.1.2/bandsolver-0.1.2-cp312-cp312-win_amd64.whl"
+          python -m pip install -e ".[test]"
+      - name: Build the Fortran and C++ programs (MinGW)
+        run: |
+          cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+      - name: Tests
+        env:
+          NMC_FORTRAN_EXE: build/fortran/nmc_f.exe
+          NMC_CPP_EXE: build/cpp/nmc_cpp.exe
+        run: python -m pytest -q

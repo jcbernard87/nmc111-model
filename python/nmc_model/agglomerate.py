@@ -237,7 +237,6 @@ class Kinetics:
 
 def _faces(dx):
     """Face interpolation weights and gradient factors for a line of control volumes."""
-    n = dx.shape[-1]
     aW = np.zeros_like(dx); bW = np.zeros_like(dx); aE = np.zeros_like(dx); bE = np.zeros_like(dx)
     with np.errstate(invalid="ignore", divide="ignore"):
         aW[..., 1:] = dx[..., :-1] / (dx[..., :-1] + dx[..., 1:])
@@ -430,7 +429,6 @@ class Model:
         aW, aE, bW, bE = (np.broadcast_to(v, (nl, na)) for v in self.faces_a)
         cW, cE, gW, gE = _face_values(ca, aW, aE, bW, bE)
         i, dI = self.kin.rate_and_fd(ca[..., C], ca[..., CS], ca[..., P1], ca[..., P2])
-        faithful = p.mode == "faithful"
         # coupling current at the agglomerate surface
         c_spec_agg = dcs_dt * F / p.rho
         i_agg = c_spec_agg * self.vol_agg * (1 - ea) * p.rho / self.area_agg

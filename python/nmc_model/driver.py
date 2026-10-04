@@ -66,7 +66,8 @@ def advance(stepper, state, dt: float, I: float, *, margin=None):
     `margin(state)` is the distance to the nearest voltage cutoff (negative once crossed). A
     sub-step that crosses by more than EVENT_DV is retried with half the length, so the step
     ends within EVENT_DV of the cutoff. Newton failures halve the sub-step, down to MIN_SUBSTEP and
-    at most MAX_FAILURES times per step, then raise SolverFailure; after each success the sub-step doubles again (up to dt), so a
+    at most MAX_FAILURES times per step, then raise SolverFailure; after each success the sub-step doubles again
+    (up to dt), so a
     failure does not leave the rest of the step crawling at a tiny sub-step.
     Returns (state, time advanced, stopped).
     """

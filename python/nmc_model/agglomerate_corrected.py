@@ -223,7 +223,7 @@ class CorrectedModel:
             except (bandsolver.NonFiniteError, bandsolver.SingularBlockError) as e:
                 raise SolverFailure(f"agglomerate solve: {e}") from e
             dxa0 = sol[0]
-            Z = np.stack(sol[1:], axis=-1)                     # (nl, na, 4, 3): response to the electrode's u, phi1, phi2
+            Z = np.stack(sol[1:], axis=-1)       # (nl, na, 4, 3): response to the electrode's u, phi1, phi2
             # electrode, with the condensed agglomerate sources: R_e + w q, linearized in the agglomerates
             Re, Ae, Be, De = self.el.residual_and_blocks(st.c, old.c, dt, I)
             q, Jq = self.surface_flux(st.ca)
