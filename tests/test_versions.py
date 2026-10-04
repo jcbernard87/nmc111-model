@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _find(path, pattern):
-    m = re.search(pattern, (ROOT / path).read_text(), re.M)
+    m = re.search(pattern, (ROOT / path).read_text(encoding="utf-8"), re.M)
     assert m, f"no version in {path}"
     return m.group(1).strip()
 
