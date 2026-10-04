@@ -132,6 +132,19 @@ program nmc
     input_file = 'nmc.nml'
     if (command_argument_count() >= 1) call get_command_argument(1, input_file)
     call read_input(trim(input_file))
+    ! mesh sizes: the separator and the cathode each need interior nodes, an agglomerate at least four
+    if (sep_node < 3) then
+        write(error_unit,'(A)') 'sep_node must be at least 3'
+        error stop 2
+    end if
+    if (nj - sep_node < 3) then
+        write(error_unit,'(A)') 'nj - sep_node must be at least 3'
+        error stop 2
+    end if
+    if (trim(particle_model) == 'agglomerate' .and. nja < 4) then
+        write(error_unit,'(A)') 'nja must be at least 4'
+        error stop 2
+    end if
     select case (trim(particle_model))
     case ('uniform')
     case ('agglomerate')
@@ -602,6 +615,7 @@ contains
     ! =============================== input ===============================
     subroutine read_input(path)
         character(len=*), intent(in) :: path
+        character(len=256) :: msg
         integer :: u, ios
         logical :: exists
         inquire(file=path, exist=exists)
@@ -610,25 +624,68 @@ contains
             error stop 2
         end if
         open(newunit=u, file=path, status='old', action='read')
-        rewind(u); read(u, nml=model, iostat=ios);       call check(ios, 'model')
+        call check_groups(u)
+        rewind(u); read(u, nml=model, iostat=ios, iomsg=msg);       call check(ios, 'model', msg)
         if (trim(particle_model) == 'agglomerate') call agg_defaults()
-        rewind(u); read(u, nml=agglomerate, iostat=ios); call check(ios, 'agglomerate')
-        rewind(u); read(u, nml=cell, iostat=ios);        call check(ios, 'cell')
-        rewind(u); read(u, nml=electrolyte, iostat=ios); call check(ios, 'electrolyte')
-        rewind(u); read(u, nml=active, iostat=ios);      call check(ios, 'active')
-        rewind(u); read(u, nml=constants, iostat=ios);   call check(ios, 'constants')
-        rewind(u); read(u, nml=operation, iostat=ios);   call check(ios, 'operation')
-        rewind(u); read(u, nml=numerics, iostat=ios);    call check(ios, 'numerics')
-        rewind(u); read(u, nml=protocol, iostat=ios);    call check(ios, 'protocol')
-        rewind(u); read(u, nml=output, iostat=ios);      call check(ios, 'output')
+        rewind(u); read(u, nml=agglomerate, iostat=ios, iomsg=msg); call check(ios, 'agglomerate', msg)
+        rewind(u); read(u, nml=cell, iostat=ios, iomsg=msg);        call check(ios, 'cell', msg)
+        rewind(u); read(u, nml=electrolyte, iostat=ios, iomsg=msg); call check(ios, 'electrolyte', msg)
+        rewind(u); read(u, nml=active, iostat=ios, iomsg=msg);      call check(ios, 'active', msg)
+        rewind(u); read(u, nml=constants, iostat=ios, iomsg=msg);   call check(ios, 'constants', msg)
+        rewind(u); read(u, nml=operation, iostat=ios, iomsg=msg);   call check(ios, 'operation', msg)
+        rewind(u); read(u, nml=numerics, iostat=ios, iomsg=msg);    call check(ios, 'numerics', msg)
+        rewind(u); read(u, nml=protocol, iostat=ios, iomsg=msg);    call check(ios, 'protocol', msg)
+        rewind(u); read(u, nml=output, iostat=ios, iomsg=msg);      call check(ios, 'output', msg)
         close(u)
     end subroutine read_input
 
-    subroutine check(ios, group)
+    subroutine check_groups(u)
+        !! Every &group in the file must be one of the program's namelist groups (a misspelled group would
+        !! otherwise be skipped silently).
+        integer, intent(in) :: u
+        character(len=12), parameter :: known(10) = [character(len=12) :: 'model', 'cell', 'electrolyte', &
+            'active', 'constants', 'operation', 'numerics', 'protocol', 'output', 'agglomerate']
+        character(len=1024) :: line
+        character(len=64) :: name
+        character(len=1) :: quote
+        integer :: ios, i, j
+        rewind(u)
+        do
+            read(u, '(A)', iostat=ios) line
+            if (ios /= 0) exit
+            quote = ' '
+            i = 1
+            do while (i <= len_trim(line))
+                if (quote /= ' ') then
+                    if (line(i:i) == quote) quote = ' '
+                else if (line(i:i) == '''' .or. line(i:i) == '"') then
+                    quote = line(i:i)
+                else if (line(i:i) == '!') then
+                    exit
+                else if (line(i:i) == '&') then
+                    j = i + 1
+                    do while (j <= len_trim(line))
+                        if (index('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_', line(j:j)) == 0) exit
+                        j = j + 1
+                    end do
+                    name = lower(line(i+1:j-1))
+                    if (.not. any(known == name)) then
+                        write(error_unit,'(A)') 'unknown namelist group &'//trim(name)
+                        error stop 2
+                    end if
+                    i = j - 1
+                end if
+                i = i + 1
+            end do
+        end do
+        rewind(u)
+    end subroutine check_groups
+
+    subroutine check(ios, group, msg)
         integer, intent(in) :: ios
-        character(len=*), intent(in) :: group
+        character(len=*), intent(in) :: group, msg
         if (ios > 0) then
-            write(error_unit,'(A)') 'error reading namelist group &'//group
+            write(error_unit,'(A)') 'error reading namelist group &'//group//': '//trim(msg)
             error stop 2
         end if
         ! ios < 0: group absent, keep defaults
@@ -753,6 +810,8 @@ contains
             if (faithful) then
                 ak_k = r32(ak_k)
                 vint = real(vint + ak_k*((2*th - 1)**(kk + 1) - (2*th*kk*(1 - th))/(2*th - 1)**(1 - kk)), sp)
+            else if (kk == 0) then
+                vd = vd + ak_k*(2*th - 1)     ! corrected: the k = 0 term alone (0/0 at theta = 1/2 would give NaN)
             else
                 vd = vd + ak_k*((2*th - 1)**(kk + 1) - (2*th*kk*(1 - th))/(2*th - 1)**(1 - kk))
             end if
@@ -1751,7 +1810,14 @@ contains
             nk = 10; uref = U_REF_U; csm = cs_max()
         end if
         do k = 0, nk
-            if (agg) then
+            ! the k = 0 term is 2 theta - 1 alone (its second part has the factor k; 0/0 at theta = 1/2 would give NaN)
+            if (k == 0) then
+                if (agg) then
+                    rk = rk + AK_A(k)*xx
+                else
+                    rk = rk + AK_U(k)*xx
+                end if
+            else if (agg) then
                 rk = rk + AK_A(k)*(xx**(k + 1) - (2*th*k*om)/xx**(1 - k))
             else
                 rk = rk + AK_U(k)*(xx**(k + 1) - (2*th*k*om)/xx**(1 - k))

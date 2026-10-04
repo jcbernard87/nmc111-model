@@ -86,8 +86,12 @@ class LogKinetics:
         rk = np.zeros_like(th)
         drk = np.zeros_like(th)
         for k, a in enumerate(self.ak):
-            with np.errstate(divide="ignore", invalid="ignore"):
-                rk = rk + a * (x ** (k + 1) - (2 * th * k * om) / x ** (1 - k))
+            # the k = 0 term is 2 theta - 1 alone (its second part has the factor k; 0/0 at theta = 1/2 would give NaN)
+            if k == 0:
+                rk = rk + a * x
+            else:
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    rk = rk + a * (x ** (k + 1) - (2 * th * k * om) / x ** (1 - k))
             term = 2.0 * (2 * k + 1) * x ** k
             if k >= 2:
                 term = term - 4.0 * k * (k - 1) * th * om * x ** (k - 2)

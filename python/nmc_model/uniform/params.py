@@ -77,7 +77,7 @@ class Params:
 
     def __post_init__(self):
         if self.mode not in MODES:
-            raise ValueError(f"mode must be one of {MODES}, got {self.mode!r}")
+            raise ValueError(f"mode must be 'faithful' or 'corrected', got {self.mode!r}")
 
     @classmethod
     def faithful(cls, *, sigma: float, k_exp: Optional[float] = None, k_rxn: Optional[float] = None,

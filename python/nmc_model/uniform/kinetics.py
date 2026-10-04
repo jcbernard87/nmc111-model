@@ -45,8 +45,13 @@ def _rk(p: Params, th):
     x = 2 * th - 1
     v = np.zeros_like(th, dtype=np.float32) if faithful else np.zeros_like(th)
     for k, a in enumerate(ak):
-        with np.errstate(divide="ignore", invalid="ignore"):
-            term = a * (powi(x, k + 1) - (2 * th * k * (1 - th)) / powi(x, 1 - k))
+        # corrected: the k = 0 term is 2 theta - 1 alone (its second part has the factor k; 0/0 at theta = 1/2
+        # would give NaN); faithful mode keeps the original's arithmetic (D-20)
+        if k == 0 and not faithful:
+            term = a * x
+        else:
+            with np.errstate(divide="ignore", invalid="ignore"):
+                term = a * (powi(x, k + 1) - (2 * th * k * (1 - th)) / powi(x, 1 - k))
         w = v.astype(np.float64) + term
         v = w.astype(np.float32) if faithful else w
     return v.astype(np.float64)

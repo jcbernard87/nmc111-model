@@ -22,6 +22,7 @@ Faithful mode reproduces the original programs, including every item below. Corr
 | D-17 | the agglomerate surface takes the local electrode c (and Φ₁, Φ₂) |
 | D-18 | both scales solved together by a condensed Newton step |
 | D-19 | the output timer is a double initialized to 0 |
+| D-20 | the Redlich-Kister sum's k = 0 term is evaluated as 2θ − 1 alone |
 
 Status values: **candidate** (suspected from the source), **confirmed** (demonstrated by a test or run), **fixed**, **kept** (reviewed and left as is, with the reason).
 
@@ -42,6 +43,7 @@ Status values: **candidate** (suspected from the source), **confirmed** (demonst
 | D-17 | A | fixed | Agglomerate surface electrolyte fixed at c_bulk instead of the local electrode concentration |
 | D-18 | A | fixed | The electrode and agglomerate scales are solved one after the other, not together |
 | D-19 | A | fixed | The output timer `last_write_time` is never initialized, so which rows are written depends on leftover memory |
+| D-20 | U, A | fixed | The OCP's Redlich-Kister sum evaluates 0/0 in its k = 0 term, 2θk(1−θ)/(2θ−1)^(1−k), at θ = 1/2 exactly, so U is NaN there: a corrected run started at θ = 1/2 stopped at once with `solver_fail` (found 2026-10-04). The term is zero for every θ; corrected mode evaluates the k = 0 term as 2θ − 1 alone, which is bit-identical elsewhere |
 
 ## Evidence (T4, instrumented private copies)
 

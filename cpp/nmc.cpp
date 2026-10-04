@@ -24,6 +24,7 @@
 #include <map>
 #include <memory>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -289,12 +290,29 @@ Params read_input(const std::string& path) {
                                         {"newton_max_iter", &p.newton_max_iter}, {"cycles", &p.cycles}, {"nja", &p.nja}};
     std::map<std::string, std::string*> strs = {{"mode", &p.mode}, {"file", &p.file}, {"steps", &p.steps},
                                                 {"particle_model", &p.particle_model}};
+    // the groups and their names, as the Fortran program's namelists declare them
+    const std::map<std::string, std::set<std::string>> groups = {
+        {"model", {"particle_model"}},
+        {"cell", {"l_cath_um", "l_sep", "nj", "sep_node", "eps", "eps_am", "eps_sep", "tau_sep", "bruggeman"}},
+        {"electrolyte", {"d", "t_plus", "c_bulk", "z_plus", "z_minus", "kappa_bg"}},
+        {"active", {"sigma", "m", "rho", "q_th", "r_p", "k_rxn", "alpha_a", "alpha_c", "k_li", "c_li_ref"}},
+        {"constants", {"r", "t", "f"}},
+        {"operation", {"c_rate", "phi1_init", "phi2_init", "cs_init", "t_max", "n_steps", "v_min", "v_max"}},
+        {"numerics", {"fd_step", "newton_tol", "newton_max_iter", "mode"}},
+        {"protocol", {"steps", "cycles"}},
+        {"output", {"file", "write_interval"}},
+        {"agglomerate", {"nja", "time_mod", "r_agg", "r_xtal", "eps_agg", "d_agg", "tortuosity_e", "mass_loading", "percent_active", "mol_vol", "c0_init", "tau_agg", "sigma_agg", "dt_s"}},
+    };
     const std::regex group(R"(&(\w+)([\s\S]*?)/)");
     const std::regex entry(R"((\w+)\s*=\s*('[^']*'|"[^"]*"|[^,\s/]+))");
     for (std::sregex_iterator g(text.begin(), text.end(), group), end; g != end; ++g) {
+        const std::string gname = lower((*g)[1]);
+        const auto gi = groups.find(gname);
+        if (gi == groups.end()) throw std::runtime_error("unknown namelist group &" + gname);
         const std::string body = (*g)[2];
         for (std::sregex_iterator e(body.begin(), body.end(), entry); e != end; ++e) {
             const std::string name = lower((*e)[1]);
+            if (!gi->second.count(name)) throw std::runtime_error("unknown name '" + name + "' in &" + gname);
             std::string val = (*e)[2];
             if (strs.count(name)) {
                 *strs[name] = (val.front() == '\'' || val.front() == '"') ? val.substr(1, val.size() - 2) : val;
@@ -469,7 +487,10 @@ struct Model {
         double vd = 0.0;
         for (int k = 0; k <= 10; ++k) {
             const double ak = faithful ? r32(AK_UNIFORM[k]) : AK_UNIFORM[k];
-            const double term = ak * (powi(2 * th - 1, k + 1) - (2 * th * k * (1 - th)) / powi(2 * th - 1, 1 - k));
+            // corrected: the k = 0 term is 2 theta - 1 alone (0/0 at theta = 1/2 would give NaN)
+            const double term = (k == 0 && !faithful)
+                                    ? ak * (2 * th - 1)
+                                    : ak * (powi(2 * th - 1, k + 1) - (2 * th * k * (1 - th)) / powi(2 * th - 1, 1 - k));
             if (faithful) vint = static_cast<float>(static_cast<double>(vint) + term);
             else vd = vd + term;
         }
@@ -693,7 +714,8 @@ struct Model {
         double rk = 0.0, drk = 0.0;
         for (int k = 0; k < nk; ++k) {
             const double a = agg ? AK_AGG[k] : AK_UNIFORM[k];
-            rk = rk + a * (powi(xx, k + 1) - (2 * th * k * om) / powi(xx, 1 - k));
+            // the k = 0 term is 2 theta - 1 alone (its second part has the factor k; 0/0 at theta = 1/2 would give NaN)
+            rk = rk + (k == 0 ? a * xx : a * (powi(xx, k + 1) - (2 * th * k * om) / powi(xx, 1 - k)));
             double term = 2.0 * (2 * k + 1) * powi(xx, k);
             if (k >= 2) term = term - 4.0 * k * (k - 1) * th * om * powi(xx, k - 2);
             drk = drk + a * term;
@@ -1455,6 +1477,10 @@ struct AggCorrected {
 int main(int argc, char** argv) {
     try {
         Params input = read_input(argc > 1 ? argv[1] : "nmc.nml");
+        // mesh sizes: the separator and the cathode each need interior nodes, an agglomerate at least four
+        if (input.sep_node < 3) throw std::runtime_error("sep_node must be at least 3");
+        if (input.nj - input.sep_node < 3) throw std::runtime_error("nj - sep_node must be at least 3");
+        if (input.particle_model == "agglomerate" && input.nja < 4) throw std::runtime_error("nja must be at least 4");
         if (input.particle_model == "agglomerate" && input.mode == "faithful") return Agglomerate(input).run();
         if (input.particle_model != "uniform" && input.particle_model != "agglomerate")
             throw std::runtime_error("particle_model must be 'uniform' or 'agglomerate'");

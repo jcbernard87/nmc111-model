@@ -59,3 +59,35 @@ def test_faithful_needs_the_fitted_values(model, missing, fortran_exe, cpp_exe, 
         assert r.returncode != 0 and missing in (r.stdout + r.stderr)
     with pytest.raises(ValueError):
         load(nml)
+
+
+BAD = [
+    ("&model\n  particle_model = 'agglomerat'\n/\n", "particle_model must be 'uniform' or 'agglomerate'"),
+    ("&numerics\n  mode = 'correctd'\n/\n", "mode must be 'faithful' or 'corrected'"),
+    ("&protocol\n  steps = 'cx C=1'\n/\n", "unknown step type"),
+    ("&cell\n  nj = 30, sep_node = 2\n/\n", "sep_node must be at least 3"),
+    ("&cell\n  nj = 24, sep_node = 22\n/\n", "nj - sep_node must be at least 3"),
+    ("&model\n  particle_model = 'agglomerate'\n/\n&agglomerate\n  nja = 3\n/\n", "nja must be at least 4"),
+    ("&initial\n  cs_init = 0.01\n/\n", "unknown namelist group &initial"),
+    ("&cell\n  cs_init = 0.01\n/\n", ("cs_init", "&cell")),          # a name in the wrong group
+]
+
+
+@pytest.mark.parametrize("text,msg", BAD)
+def test_programs_reject_bad_values(text, msg, fortran_exe, cpp_exe, tmp_path):
+    """A bad option value, mesh size, group or misplaced name stops each program with a non-zero exit and that
+    specific message (not just the key's name, which a generic 'unknown name' error would also contain) (#5).
+    The Fortran program skipped unknown groups silently, and the C++ program accepted a name in any group."""
+    if "mode = " not in text:
+        text += "&numerics\n  mode = 'corrected'\n/\n"
+    nml = tmp_path / "bad.nml"
+    nml.write_text(text + "&output\n  file = 'out.txt'\n/\n")
+    msgs = msg if isinstance(msg, tuple) else (msg,)
+    for exe in (fortran_exe, cpp_exe):
+        r = subprocess.run([str(exe), str(nml)], cwd=tmp_path, capture_output=True, text=True)
+        assert r.returncode != 0 and all(m in r.stdout + r.stderr for m in msgs), (exe, r.stdout + r.stderr)
+    with pytest.raises(ValueError) as err:
+        p, model, _ = load(nml)
+        from nmc_model.protocol import parse
+        parse(p.steps, p)                           # the protocol is parsed when a run starts
+    assert all(m in str(err.value) for m in msgs), str(err.value)

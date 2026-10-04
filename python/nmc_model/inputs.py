@@ -33,6 +33,16 @@ AGG_NAMES = {
 }
 
 
+def _check_mesh(p, model):
+    """The separator and the cathode each need interior nodes, an agglomerate at least four."""
+    if p.sep_node < 3:
+        raise ValueError("sep_node must be at least 3")
+    if p.nj - p.sep_node < 3:
+        raise ValueError("nj - sep_node must be at least 3")
+    if model == "agglomerate" and p.nja < 4:
+        raise ValueError("nja must be at least 4")
+
+
 def load(path):
     """Read an input file. Returns (params, particle_model, output_file)."""
     text = Path(path).read_text()
@@ -43,6 +53,7 @@ def load(path):
         if "agglomerate" in data:
             raise ValueError("&agglomerate is only for particle_model = 'agglomerate'")
         p, extra = _unl.from_dict(data)
+        _check_mesh(p, model)
         return p, model, extra.get("file", out_file)
     if model != "agglomerate":
         raise ValueError("particle_model must be 'uniform' or 'agglomerate'")
@@ -61,13 +72,18 @@ def load(path):
         t = str(types[name])
         values[name] = int(val) if t == "int" else (str(val) if t == "str" else float(val))
     mode = values.pop("mode", "corrected")
+    if mode not in ("faithful", "corrected"):
+        raise ValueError(f"mode must be 'faithful' or 'corrected', got {mode!r}")
     if mode == "faithful":
         need = {"D_agg", "rxn_k", "tortuosity", "mass_loading"}
         if not need <= values.keys():
             raise ValueError("faithful agglomerate runs need D_agg, k_rxn, tortuosity_e and mass_loading "
                              "(the original's fitted values are not distributed)")
-        return AggParams.faithful(**values), model, out_file
-    return AggParams(mode=mode, **values), model, out_file
+        p = AggParams.faithful(**values)
+    else:
+        p = AggParams(mode=mode, **values)
+    _check_mesh(p, model)
+    return p, model, out_file
 
 
 def run_file(path, out=None):

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Fix (D-20):** the OCP's Redlich-Kister sum evaluated 0/0 at θ = 1/2 exactly, so U was NaN there and a corrected run started at θ = 1/2 stopped at once (all three languages). Corrected mode evaluates the k = 0 term as 2θ − 1 alone; output elsewhere is bit-identical. Faithful mode keeps the original's arithmetic.
+- **Input checks:** mesh sizes are validated (`sep_node` ≥ 3, `nj` − `sep_node` ≥ 3, `nja` ≥ 4); the Fortran program rejects unknown namelist groups (it skipped them silently) and names the offending entry; the C++ program rejects a name in the wrong group (it accepted any group); Python rejects a misspelled `mode` for the agglomerate model too. Messages agree across the three languages.
+
 ## 0.2.0 (2026-10-04)
 
 - **Driver fixes** (corrected mode, both models, all three languages): a cc discharge ends only at its `Vmin` and a charge only at its `Vmax`, as documented (both bounds were applied, so a step starting beyond the other bound stopped at once as a cutoff); when a time step cannot be solved, the exit row is the last converged sub-step, not the state at the start of the time step (the capacity of the partial step was lost). Faithful mode is unchanged. Found while porting the Zn/MnO₂ model.

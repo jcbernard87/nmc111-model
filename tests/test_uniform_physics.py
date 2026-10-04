@@ -199,3 +199,35 @@ def test_cell_voltage_against_foil(mid_discharge):
     assert ref[0, 2] == pytest.approx(-(u_li + eta_li), abs=1e-15)
     assert cell_voltage(p, x, p.i_app) == pytest.approx(ref[-1, 1], abs=1e-15)
     assert eta_li > 0 and c0 > p.c_bulk and u_li > 0          # discharge: salt builds up at the foil
+
+
+@pytest.mark.parametrize("model", ["uniform", "agglomerate"])
+def test_ocp_electrolyte_term(model):
+    """The OCP carries (RT/F) ln(c/c_bulk): doubling c raises U by (RT/F) ln 2 to 1e-12, in the corrected
+    kinetics of both models (log variables) and in the c-form OCP that faithful mode uses (the original has the
+    term too), and the two forms agree at the same state (#6). theta = 1/2 is included: the Redlich-Kister sum's
+    k = 0 term used to evaluate 0/0 there (NaN) in corrected mode."""
+    import math
+    from nmc_model.uniform import kinetics
+    from nmc_model.agglomerate import AggParams
+    from nmc_model.agglomerate_corrected import CorrectedModel
+    if model == "uniform":
+        p = Params(mode="corrected")
+        kin = LogUniformModel(p).kin
+    else:
+        p = AggParams(mode="corrected")
+        kin = CorrectedModel(p).kin
+    rtf = p.R * p.T / p.F
+    th = np.array([0.3, 0.5, 0.7])
+    s = np.log(th / (1.0 - th))
+    shift = kin.ocp(np.full(3, math.log(2.0)), s) - kin.ocp(np.zeros(3), s)
+    np.testing.assert_allclose(shift, rtf * math.log(2.0), rtol=1e-12, atol=0.0)
+    if model == "uniform":
+        cs = th * kinetics.cs_max(p)
+        for q in (p, Params.faithful(k_rxn=1e-6, sigma=0.1)):
+            # faithful mode keeps the original's 0/0 at theta = 1/2 exactly (D-20): compare away from it
+            d = kinetics.ocp(q, 2.0 * q.c_bulk, cs) - kinetics.ocp(q, q.c_bulk, cs)
+            if q.mode == "faithful":
+                d = d[[0, 2]]
+            np.testing.assert_allclose(d, q.R * q.T / q.F * math.log(2.0), rtol=1e-6, atol=0.0)
+        np.testing.assert_allclose(kin.ocp(np.zeros(3), s), kinetics.ocp(p, p.c_bulk, cs), rtol=1e-12)

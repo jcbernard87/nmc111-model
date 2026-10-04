@@ -172,3 +172,18 @@ def test_cv_hold_after_a_discharge_proceeds_in_sub_steps(fortran_exe, cpp_exe, r
     tok = out.read_text().splitlines()[-1].split()
     assert float(tok[2]) == pytest.approx(4.2, abs=1e-6)                               # voltage held
     assert abs(float(tok[7])) <= 0.05 * Params(mode="corrected").i_1C * 1e3 * (1 + 1e-9)  # current at the limit
+
+
+def test_a_run_from_theta_one_half(fortran_exe, cpp_exe, run_native, tmp_path):
+    """Starting from exactly theta = 1/2 (s = 0), the corrected OCP is finite: the Redlich-Kister sum's k = 0
+    term evaluated 0/0 there, and every implementation stopped at once with solver_fail."""
+    from nmc_model.uniform import kinetics
+    cs = 0.5 * kinetics.cs_max(Params(mode="corrected"))
+    steps = "cc C=1 t=60"
+    r = run_uniform(Params(mode="corrected", steps=steps, cs_init=cs))
+    assert r.exit_reason == "duration"
+    for exe in (fortran_exe, cpp_exe):
+        out = run_native(exe, {"numerics": {"mode": "corrected"}, "operation": {"cs_init": cs},
+                               "protocol": {"steps": steps}}, name=f"half_{exe.name}.txt")
+        t, v = _last_time_voltage(out)
+        assert t == pytest.approx(60 / 3600, abs=1e-5) and np.isfinite(v)
