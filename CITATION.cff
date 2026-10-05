@@ -7,8 +7,8 @@ type: software
 authors:
   - given-names: John
     family-names: Bernard
-version: 0.2.0
-date-released: 2026-10-04
+version: 0.2.1
+date-released: 2026-10-05
 license: BSD-3-Clause
 doi: 10.5281/zenodo.23093184
 identifiers:
