@@ -14,6 +14,15 @@ from typing import Optional
 import numpy as np
 
 MODES = ("faithful", "corrected")
+DT_MODES = ("fixed", "adaptive")
+
+
+def check_dt_mode(p):
+    """dt_mode is 'fixed' or 'adaptive', and adaptive only in corrected mode (both particle models)."""
+    if p.dt_mode not in DT_MODES:
+        raise ValueError(f"dt_mode must be one of {DT_MODES}, got {p.dt_mode!r}")
+    if p.dt_mode == "adaptive" and p.mode != "corrected":
+        raise ValueError("dt_mode='adaptive' needs mode='corrected'")
 
 
 def f32(x: float) -> float:
@@ -68,6 +77,11 @@ class Params:
     fd_step: float = 1.0e-6        # absolute step of the finite-difference reaction derivatives
     newton_tol: float = 1.0e-10    # corrected mode: scaled update tolerance per time step (D-7)
     newton_max_iter: int = 25
+    dt_mode: str = "fixed"         # corrected mode: 'fixed' time steps, or 'adaptive' (docs/protocol.md)
+    rtol: float = 1.0e-4           # adaptive: local error tolerance, relative ...
+    atol: float = 1.0e-4           # ... and absolute, on the state (ln c, potentials [V], log-odds of theta)
+    dt_min: float = 1.0e-6         # [s] adaptive: smallest step
+    dt_max: float = 0.0            # [s] adaptive: largest step (0: write_interval)
     kappa_bg: float = 1.0e-8       # corrected mode: background (solvent) ionic conductivity [S/cm]
     # --- protocol and output (corrected mode; docs/protocol.md) ---
     steps: str = ""                # empty: classic discharge at C_rate
@@ -78,6 +92,7 @@ class Params:
     def __post_init__(self):
         if self.mode not in MODES:
             raise ValueError(f"mode must be 'faithful' or 'corrected', got {self.mode!r}")
+        check_dt_mode(self)
 
     @classmethod
     def faithful(cls, *, sigma: float, k_exp: Optional[float] = None, k_rxn: Optional[float] = None,

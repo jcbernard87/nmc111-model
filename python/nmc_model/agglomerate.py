@@ -87,6 +87,11 @@ class AggParams:
     kappa_bg: float = 1.0e-8           # background (solvent) ionic conductivity [S/cm], keeps phi2 defined where c = 0
     newton_tol: float = 1.0e-10
     newton_max_iter: int = 25
+    dt_mode: str = "fixed"         # corrected mode: 'fixed' time steps, or 'adaptive' (docs/protocol.md)
+    rtol: float = 1.0e-4           # adaptive: local error tolerance, relative ...
+    atol: float = 1.0e-4           # ... and absolute, on the state (ln c, potentials [V], log-odds of theta)
+    dt_min: float = 1.0e-6         # [s] adaptive: smallest step
+    dt_max: float = 0.0            # [s] adaptive: largest step (0: write_interval)
     V_min: float = 3.0                 # [V]
     V_max: float = 4.4                 # [V]
     steps: str = ""                    # protocol (docs/protocol.md); empty: discharge at C_rate
@@ -150,6 +155,10 @@ class AggParams:
     @property
     def i_specific(self) -> float:
         return self.Q_th * self.C_rate
+
+    def __post_init__(self):
+        from .uniform.params import check_dt_mode
+        check_dt_mode(self)
 
     @property
     def dt(self) -> float:

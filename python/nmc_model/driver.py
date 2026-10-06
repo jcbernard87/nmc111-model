@@ -15,13 +15,24 @@ model: it works with any *stepper*, an object with
   used as the exit reason when a step cannot be solved (see LIMIT_* below)
 
 Sub-steps are halved when Newton fails, voltage cutoffs are located to within EVENT_DV, and a
-constant-voltage step finds its current by bracketing (see cv_step).
+constant-voltage step finds its current by bracketing (see cv_step), in sub-steps if no current holds
+the voltage for a whole time step (cv_advance).
+
+With p.dt_mode = 'adaptive' the time step is chosen from an estimate of backward Euler's local error:
+the difference between the new state and the linear predictor through the last two states, times
+h/(h + h_prev), in the weighted RMS norm with weights atol + rtol*|x| (the stepper's state, or
+stepper.flat(state), is ln c, potentials and log-odds, so one atol suits every variable). A step whose
+error exceeds 1 is redone with a smaller h; steps are shortened to land on the output times. Each
+protocol step starts again from p.dt, without a predictor (a step change of current or voltage is a
+discontinuity).
 """
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
 from typing import Any, Optional
+
+import numpy as np
 
 from .protocol import Step, expand
 
@@ -197,6 +208,11 @@ def run_protocol(stepper, *, max_steps: Optional[int] = None, result=None) -> Pr
         res.exit_reason, res.steps, res.final_state = reason, n_done, state
         return res
 
+    adaptive = getattr(p, "dt_mode", "fixed") == "adaptive"
+    if adaptive:
+        flat = getattr(stepper, "flat", np.ravel)
+        h_max = p.dt_max if p.dt_max > 0 else p.write_interval
+
     I = first_current(steps[0])
     res.rows.append(stepper.row(t, state, mAhg, I, 1))
     last_write = t
@@ -205,11 +221,18 @@ def run_protocol(stepper, *, max_steps: Optional[int] = None, result=None) -> Pr
         t_step = 0.0
         if st.kind != "cv":
             I = first_current(st)
+        h_next, prev = dt, None              # adaptive: the next step, and (state, step) before this one
         while True:
             if max_steps is not None and n_done >= max_steps:
                 res.exit_reason, res.steps, res.final_state = "max_steps", n_done, state
                 return res
-            h = dt if st.t is None else min(dt, st.t - t_step)
+            if adaptive:
+                h = min(h_next, h_max, last_write + p.write_interval - t)
+                if st.t is not None:
+                    h = min(h, st.t - t_step)
+                clipped, I_start = h < h_next, I
+            else:
+                h = dt if st.t is None else min(dt, st.t - t_step)
             try:
                 if st.kind == "cv":
                     new, I, h_done = cv_advance(stepper, state, h, st.V, I)
@@ -231,6 +254,24 @@ def run_protocol(stepper, *, max_steps: Optional[int] = None, result=None) -> Pr
                     state, t, n_done = e.state, t + e.t_done, n_done + 1
                 why = getattr(stepper, "limit_reason", lambda s: None)(state)
                 return finish(why or "solver_fail", k, I)
+            if adaptive and not stopped:
+                x0, xn = flat(state), flat(new)
+                fac = 2.0
+                if prev is not None:
+                    xp, hp = prev
+                    pred = x0 + (h_done / hp) * (x0 - xp)
+                    terms = ((xn - pred) / (p.atol + p.rtol * np.abs(xn))) ** 2
+                    s = 0.0
+                    for v in terms.tolist():         # summed in order, as in the Fortran and C++ programs
+                        s += v
+                    err = h_done / (h_done + hp) * math.sqrt(s / terms.size)
+                    fac = 2.0 if err == 0.0 else min(2.0, max(0.2, 0.9 / math.sqrt(err)))
+                    if err > 1.0 and h_done > p.dt_min:
+                        h_next, I = max(p.dt_min, h_done * fac), I_start     # redo the step, shorter
+                        continue
+                prev = (x0, h_done)
+                if not (clipped and fac >= 1.0):     # a step shortened to land on a write time keeps h_next
+                    h_next = max(p.dt_min, h_done * fac)
             mAhg = mAhg + 1000.0 * (I / p.mass_area) * h_done / 3600.0
             state, t, t_step, n_done = new, t + h_done, t_step + h_done, n_done + 1
             if not stepper.finite(state):
@@ -240,7 +281,7 @@ def run_protocol(stepper, *, max_steps: Optional[int] = None, result=None) -> Pr
                 last_write = t
                 reason = why if stopped else "duration"
                 break
-            if t - last_write >= p.write_interval:
+            if t - last_write >= p.write_interval * (1.0 - 1.0e-12 if adaptive else 1.0):
                 res.rows.append(stepper.row(t, state, mAhg, I, k))
                 last_write = t
             if t >= 99.0 * 3600.0:

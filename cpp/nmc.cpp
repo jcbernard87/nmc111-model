@@ -243,6 +243,9 @@ struct Params {
     double fd_step = 1.0e-6;
     double newton_tol = 1.0e-10;           // corrected-mode Newton tolerance (D-7)
     int newton_max_iter = 25;
+    std::string dt_mode = "fixed";         // corrected mode: 'fixed' or 'adaptive' (docs/protocol.md)
+    double rtol = 1.0e-4, atol = 1.0e-4;   // adaptive: local error tolerances on the state
+    double dt_min = 1.0e-6, dt_max = 0.0;  // [s] adaptive: step bounds (dt_max = 0: write_interval)
     std::string mode = "faithful";
     std::string steps;                     // corrected-mode protocol (docs/protocol.md)
     int cycles = 1;
@@ -285,11 +288,12 @@ Params read_input(const std::string& path) {
         {"r_agg", &p.R_agg}, {"r_xtal", &p.R_xtal}, {"eps_agg", &p.eps_agg}, {"d_agg", &p.D_agg},
         {"tortuosity_e", &p.tortuosity_e}, {"mass_loading", &p.mass_loading}, {"percent_active", &p.percent_active},
         {"mol_vol", &p.mol_vol}, {"c0_init", &p.c0_init}, {"tau_agg", &p.tau_agg}, {"sigma_agg", &p.sigma_agg},
-        {"dt_s", &p.dt_s}, {"kappa_bg", &p.kappa_bg}};
+        {"dt_s", &p.dt_s}, {"kappa_bg", &p.kappa_bg}, {"rtol", &p.rtol}, {"atol", &p.atol}, {"dt_min", &p.dt_min},
+        {"dt_max", &p.dt_max}};
     std::map<std::string, int*> ints = {{"nj", &p.nj}, {"sep_node", &p.sep_node}, {"n_steps", &p.n_steps},
                                         {"newton_max_iter", &p.newton_max_iter}, {"cycles", &p.cycles}, {"nja", &p.nja}};
     std::map<std::string, std::string*> strs = {{"mode", &p.mode}, {"file", &p.file}, {"steps", &p.steps},
-                                                {"particle_model", &p.particle_model}};
+                                                {"particle_model", &p.particle_model}, {"dt_mode", &p.dt_mode}};
     // the groups and their names, as the Fortran program's namelists declare them
     const std::map<std::string, std::set<std::string>> groups = {
         {"model", {"particle_model"}},
@@ -298,7 +302,7 @@ Params read_input(const std::string& path) {
         {"active", {"sigma", "m", "rho", "q_th", "r_p", "k_rxn", "alpha_a", "alpha_c", "k_li", "c_li_ref"}},
         {"constants", {"r", "t", "f"}},
         {"operation", {"c_rate", "phi1_init", "phi2_init", "cs_init", "t_max", "n_steps", "v_min", "v_max"}},
-        {"numerics", {"fd_step", "newton_tol", "newton_max_iter", "mode"}},
+        {"numerics", {"fd_step", "newton_tol", "newton_max_iter", "mode", "dt_mode", "rtol", "atol", "dt_min", "dt_max"}},
         {"protocol", {"steps", "cycles"}},
         {"output", {"file", "write_interval"}},
         {"agglomerate", {"nja", "time_mod", "r_agg", "r_xtal", "eps_agg", "d_agg", "tortuosity_e", "mass_loading", "percent_active", "mol_vol", "c0_init", "tau_agg", "sigma_agg", "dt_s"}},
@@ -433,6 +437,9 @@ struct Model {
         if (p.mode == "faithful") faithful = true;
         else if (p.mode == "corrected") faithful = false;
         else throw std::runtime_error("mode must be 'faithful' or 'corrected'");
+        if (p.dt_mode != "fixed" && p.dt_mode != "adaptive")
+            throw std::runtime_error("dt_mode must be one of ('fixed', 'adaptive'), got '" + p.dt_mode + "'");
+        if (p.dt_mode == "adaptive" && faithful) throw std::runtime_error("dt_mode='adaptive' needs mode='corrected'");
         if (faithful) {  // single-precision literals of the original (D-4)
             p.R = r32(p.R); p.c_bulk = r32(p.c_bulk); p.Q_th = r32(p.Q_th); p.M = r32(p.M); p.rho = r32(p.rho);
             p.phi1_init = r32(p.phi1_init); p.eps_sep = r32(p.eps_sep); p.eps_AM = r32(p.eps_AM);
@@ -1767,6 +1774,26 @@ int main(int argc, char** argv) {
                 return false;
             };
 
+            // adaptive steps (see driver.py): backward Euler's local error, h/(h + hp) times the weighted RMS of the
+            // new state less the linear predictor through the two states before it; weights atol + rtol*|x|
+            const bool adaptive = p.dt_mode == "adaptive";
+            const double h_max = p.dt_max > 0.0 ? p.dt_max : p.write_interval;
+            auto local_error = [&](const std::vector<double>& c0, const std::vector<double>& ca0,
+                                   const std::vector<double>& cp, const std::vector<double>& cap, double h, double hp) {
+                double s = 0.0;
+                for (std::size_t i = 0; i < c.size(); ++i) {
+                    const double pred = c0[i] + (h / hp) * (c0[i] - cp[i]);
+                    const double e = (c[i] - pred) / (p.atol + p.rtol * std::abs(c[i]));
+                    s = s + e * e;
+                }
+                for (std::size_t i = 0; i < ca.size(); ++i) {
+                    const double pred = ca0[i] + (h / hp) * (ca0[i] - cap[i]);
+                    const double e = (ca[i] - pred) / (p.atol + p.rtol * std::abs(ca[i]));
+                    s = s + e * e;
+                }
+                return h / (h + hp) * std::sqrt(s / static_cast<double>(c.size() + ca.size()));
+            };
+
             double I = steps[0].kind == Kind::cc ? steps[0].C * m.i_1C : 0.0;
             m.i_app = I;
             write_row(true, 1);
@@ -1780,8 +1807,20 @@ int main(int argc, char** argv) {
                 double t_step = 0.0;
                 if (st.kind == Kind::cc) I = st.C * m.i_1C;
                 else if (st.kind == Kind::rest) I = 0.0;
+                double h_next = dt, hp = 0.0;
+                bool have_prev = false;
+                std::vector<double> c0, ca0, cp, cap;
                 while (true) {
-                    const double h = st.t < 0 ? dt : std::min(dt, st.t - t_step);
+                    double h = st.t < 0 ? dt : std::min(dt, st.t - t_step);
+                    bool clipped = false;
+                    const double I_start = I;
+                    if (adaptive) {
+                        h = std::min(std::min(h_next, h_max), last_write + p.write_interval - t);
+                        if (st.t >= 0) h = std::min(h, st.t - t_step);
+                        clipped = h < h_next;
+                        c0 = c;
+                        ca0 = ca;
+                    }
                     double h_done = 0.0;
                     bool stopped = false, ok;
                     std::string why;
@@ -1804,6 +1843,26 @@ int main(int argc, char** argv) {
                         }
                         write_row(false, step_no); exit_reason = limit_reason(); finished = false; break;
                     }
+                    if (adaptive && !stopped) {
+                        double fac = 2.0;
+                        if (have_prev) {
+                            const double err = local_error(c0, ca0, cp, cap, h_done, hp);
+                            if (err != 0.0) fac = std::min(2.0, std::max(0.2, 0.9 / std::sqrt(err)));
+                            if (err > 1.0 && h_done > p.dt_min) {
+                                h_next = std::max(p.dt_min, h_done * fac);   // redo the step, shorter
+                                c = c0;
+                                ca = ca0;
+                                I = I_start;
+                                m.i_app = I;
+                                continue;
+                            }
+                        }
+                        cp = c0;
+                        cap = ca0;
+                        hp = h_done;
+                        have_prev = true;
+                        if (!(clipped && fac >= 1.0)) h_next = std::max(p.dt_min, h_done * fac);
+                    }
                     mAhg = mAhg + 1000.0 * (I / m.mass_area) * h_done / 3600.0;
                     t = t + h_done;
                     t_step = t_step + h_done;
@@ -1818,7 +1877,10 @@ int main(int argc, char** argv) {
                         reason = stopped ? why : "duration";
                         break;
                     }
-                    if (t - last_write >= p.write_interval) { write_row(false, step_no); last_write = t; }
+                    if (t - last_write >= p.write_interval * (adaptive ? 1.0 - 1.0e-12 : 1.0)) {
+                        write_row(false, step_no);
+                        last_write = t;
+                    }
                     if (t >= 99.0 * 3600.0) { write_row(false, step_no); exit_reason = "max_time"; finished = false; break; }
                 }
             }

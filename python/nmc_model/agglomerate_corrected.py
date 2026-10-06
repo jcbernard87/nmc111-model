@@ -286,6 +286,11 @@ class AggStepper:
     def newton_step(self, st, h, I):
         return self.model.newton_step(st, h, I, backend=self.backend)
 
+    @staticmethod
+    def flat(st):
+        """The state as one vector, for the adaptive driver's error estimate."""
+        return np.concatenate((st.c.ravel(), st.ca.ravel()))
+
     def voltage(self, st, I):
         return self.model.voltage(st, I)
 

@@ -81,5 +81,8 @@ The defaults of `AggParams` and of the `&agglomerate` input. Values not listed a
 | `V_min`, `V_max` | 3.0 V, 4.4 V | NMC111 half-cell limits; the initial open-circuit voltage is 4.37 V |
 | `k_Li`, `c_Li_ref` | 10⁻⁶, 10⁻³ mol/cm³ | the lithium foil, as in lfp-model |
 | `kappa_bg` | 10⁻⁸ S/cm | the solvent's own ionic conductivity (neat carbonates are about 10⁻⁹ to 10⁻⁷ S/cm); keeps Φ₂ defined where the salt is exhausted (docs/model.md section 8). Both models, corrected mode |
+| `dt_mode` | `'fixed'` | `'adaptive'` chooses the time step from the local error estimate (docs/protocol.md; #8). Both models, corrected mode |
+| `rtol`, `atol` | 10⁻⁴, 10⁻⁴ | adaptive: local error tolerances on the state (ln c, potentials in V, log-odds of θ) |
+| `dt_min`, `dt_max` | 10⁻⁶ s, 0 | adaptive: step bounds; `dt_max = 0` means `write_interval` |
 
 The notebook `agglomerate_vs_uniform` shows how the results depend on σ, k and the agglomerate transport.

@@ -27,6 +27,8 @@
 /
 &numerics
   mode = 'corrected'
+  dt_mode = 'fixed'        ! 'fixed' or 'adaptive' (local error control, docs/protocol.md)
+  rtol = 1.0d-4, atol = 1.0d-4, dt_min = 1.0d-6, dt_max = 0.0   ! adaptive only; dt_max = 0: write_interval
 /
 &protocol
   steps = ''               ! empty: one constant-current step at C_rate down to V_min (docs/protocol.md)

@@ -39,6 +39,9 @@ program nmc
     real(dp) :: fd_step = 1.0e-6_dp
     real(dp) :: newton_tol = 1.0e-10_dp                ! corrected-mode Newton tolerance (D-7)
     integer  :: newton_max_iter = 25
+    character(len=16)  :: dt_mode = 'fixed'            ! corrected mode: 'fixed' or 'adaptive' (docs/protocol.md)
+    real(dp) :: rtol = 1.0e-4_dp, atol = 1.0e-4_dp     ! adaptive: local error tolerances on the state
+    real(dp) :: dt_min = 1.0e-6_dp, dt_max = 0.0_dp    ! [s] adaptive: step bounds (dt_max = 0: write_interval)
     character(len=16)  :: mode = 'faithful'
     character(len=2048) :: steps = ''                  ! corrected-mode protocol (docs/protocol.md)
     integer  :: cycles = 1
@@ -52,7 +55,7 @@ program nmc
     namelist /active/ sigma, M, rho, Q_th, R_p, k_rxn, alpha_a, alpha_c, k_Li, c_Li_ref
     namelist /constants/ R, T, F
     namelist /operation/ C_rate, phi1_init, phi2_init, cs_init, t_max, n_steps, V_min, V_max
-    namelist /numerics/ fd_step, newton_tol, newton_max_iter, mode
+    namelist /numerics/ fd_step, newton_tol, newton_max_iter, mode, dt_mode, rtol, atol, dt_min, dt_max
     namelist /protocol/ steps, cycles
     namelist /output/ file, write_interval
 
@@ -401,6 +404,19 @@ contains
         real(dp) :: I, h, h_done, t_step, last_write
         logical :: stopped, ok
         character(len=16) :: why, reason
+        ! adaptive steps (see driver.py): the next step, the step before this one and its start state
+        logical :: adaptive, have_prev, clipped
+        real(dp) :: h_next, h_max, hp, I_start, err, fac
+        real(dp), allocatable :: c0(:,:), cag0(:,:,:), cp(:,:), cagp(:,:,:)
+
+        adaptive = trim(dt_mode) == 'adaptive'
+        h_max = write_interval
+        if (dt_max > 0.0_dp) h_max = dt_max
+        allocate(c0(NV,nj), cp(NV,nj))
+        if (aggc) then
+            allocate(cag0, mold=cag)
+            allocate(cagp, mold=cag)
+        end if
 
         I = 0.0_dp
         if (skind(1) == K_CC) I = sC(1)*i_1C
@@ -416,9 +432,21 @@ contains
             else if (skind(k) == K_REST) then
                 I = 0.0_dp
             end if
+            h_next = dt
+            have_prev = .false.
+            hp = 0.0_dp
             do
-                h = dt
-                if (sT(k) >= 0) h = min(dt, sT(k) - t_step)
+                if (adaptive) then
+                    h = min(h_next, h_max, last_write + write_interval - time)
+                    if (sT(k) >= 0) h = min(h, sT(k) - t_step)
+                    clipped = h < h_next
+                    I_start = I
+                    c0 = c
+                    if (aggc) cag0 = cag
+                else
+                    h = dt
+                    if (sT(k) >= 0) h = min(dt, sT(k) - t_step)
+                end if
                 if (skind(k) == K_CV) then
                     call cv_advance(h, sV(k), I, ok, h_done)
                     stopped = sImin(k) >= 0 .and. abs(I) <= sImin(k)*i_1C
@@ -444,6 +472,26 @@ contains
                     nsolve = nsteps_done
                     return
                 end if
+                if (adaptive .and. .not. stopped) then
+                    fac = 2.0_dp
+                    if (have_prev) then
+                        err = local_error(c0, cp, cag0, cagp, h_done, hp)
+                        if (err /= 0.0_dp) fac = min(2.0_dp, max(0.2_dp, 0.9_dp/sqrt(err)))
+                        if (err > 1.0_dp .and. h_done > dt_min) then
+                            h_next = max(dt_min, h_done*fac)      ! redo the step, shorter
+                            c = c0
+                            if (aggc) cag = cag0
+                            I = I_start
+                            i_app = I
+                            cycle
+                        end if
+                    end if
+                    cp = c0
+                    if (aggc) cagp = cag0
+                    hp = h_done
+                    have_prev = .true.
+                    if (.not. (clipped .and. fac >= 1.0_dp)) h_next = max(dt_min, h_done*fac)
+                end if
                 mAhg = mAhg + 1000.0_dp*(I/mass_area)*h_done/3600.0_dp
                 time = time + h_done
                 t_step = t_step + h_done
@@ -464,7 +512,8 @@ contains
                     end if
                     exit
                 end if
-                if (time - last_write >= write_interval) then
+                if ((.not. adaptive .and. time - last_write >= write_interval) .or. &
+                    (adaptive .and. time - last_write >= write_interval*(1.0_dp - 1.0e-12_dp))) then
                     call write_row_c(.false., k)
                     last_write = time
                 end if
@@ -483,6 +532,37 @@ contains
         end if
         nsolve = nsteps_done
     end subroutine run_protocol
+
+    real(dp) function local_error(c0, cp, cag0, cagp, h, hp)
+        !! Backward Euler's local error estimate (driver.py): h/(h + hp) times the weighted RMS of the new state
+        !! (c, and cag in the agglomerate model) less the linear predictor through cp (hp before c0) and c0;
+        !! weights atol + rtol*|x|. cag0 and cagp are only referenced in the agglomerate model.
+        real(dp), intent(in) :: c0(:,:), cp(:,:), h, hp
+        real(dp), allocatable, intent(in) :: cag0(:,:,:), cagp(:,:,:)
+        real(dp) :: s, pred
+        integer :: j, v, l, q, n
+        s = 0.0_dp
+        n = 0
+        do j = 1, size(c, 2)
+            do v = 1, NV
+                pred = c0(v,j) + (h/hp)*(c0(v,j) - cp(v,j))
+                s = s + ((c(v,j) - pred)/(atol + rtol*abs(c(v,j))))**2
+                n = n + 1
+            end do
+        end do
+        if (aggc) then
+            do l = 1, size(cag, 3)
+                do q = 1, size(cag, 2)
+                    do v = 1, NV
+                        pred = cag0(v,q,l) + (h/hp)*(cag0(v,q,l) - cagp(v,q,l))
+                        s = s + ((cag(v,q,l) - pred)/(atol + rtol*abs(cag(v,q,l))))**2
+                        n = n + 1
+                    end do
+                end do
+            end do
+        end if
+        local_error = h/(h + hp)*sqrt(s/real(n, dp))
+    end function local_error
 
     subroutine cv_advance(h, V_set, I, ok, h_done)
         !! A constant-voltage sub-step: cv_step over h, halved (down to 1e-10 s) while no current holds V_set
@@ -719,6 +799,14 @@ contains
             write(error_unit,'(A)') 'mode must be ''faithful'' or ''corrected'''
             error stop 2
         end select
+        if (trim(dt_mode) /= 'fixed' .and. trim(dt_mode) /= 'adaptive') then
+            write(error_unit,'(A)') 'dt_mode must be one of (''fixed'', ''adaptive''), got '''//trim(dt_mode)//''''
+            error stop 2
+        end if
+        if (trim(dt_mode) == 'adaptive' .and. faithful) then
+            write(error_unit,'(A)') 'dt_mode=''adaptive'' needs mode=''corrected'''
+            error stop 2
+        end if
 
         if (faithful) then
             R = r32(R); c_bulk = r32(c_bulk); Q_th = r32(Q_th); M = r32(M); rho = r32(rho)

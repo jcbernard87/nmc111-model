@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Adaptive time stepping** (corrected mode, both models, all three languages; #8): `dt_mode = 'adaptive'` chooses each time step from backward Euler's local error estimate (linear predictor), against `rtol` and `atol`, within `dt_min` and `dt_max`; steps land on the output times. Agglomerate runs stay byte-identical across Python, Fortran and C++. The default stays `dt_mode = 'fixed'`, so existing inputs give the same output.
+
 ## 0.2.1 (2026-10-05)
 
 - **Fix (D-20):** the OCP's Redlich-Kister sum evaluated 0/0 at θ = 1/2 exactly, so U was NaN there and a corrected run started at θ = 1/2 stopped at once (all three languages). Corrected mode evaluates the k = 0 term as 2θ − 1 alone; output elsewhere is bit-identical. Faithful mode keeps the original's arithmetic.
