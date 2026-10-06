@@ -5,6 +5,7 @@
 A one-dimensional model of an NMC111 half cell (lithium foil | separator | porous NMC111 cathode | current collector) with two particle models, solved with [bandsolver](https://github.com/jcbernard87/bandsolver), an implementation of Newman's BAND method.
 
 - **Uniform particles** (`particle_model = 'uniform'`): each electrode node holds uniform-concentration particles.
+- **Crystals** (`particle_model = 'crystal'`, corrected mode): the uniform model with solid-state diffusion inside each node's crystals (sphere, cylinder or slab), ported from [lfp-model](https://github.com/jcbernard87/lfp-model).
 - **Agglomerates** (`particle_model = 'agglomerate'`): each electrode node holds porous spherical agglomerates of small crystals. The agglomerates have their own electrolyte, electronic conduction and reaction inside. The two scales are coupled through the agglomerate surfaces and solved together, with one Newton iteration for both scales at every step.
 
 Both use dilute-solution transport of a binary electrolyte, electronic conduction and Butler–Volmer insertion kinetics. They are discretized with finite volumes, advanced by backward Euler with Newton's method at every step, and run constant-current, constant-voltage and rest protocols, including cycling.
@@ -57,7 +58,7 @@ t_h, volts = r.array[:, 0], r.array[:, 1]
 
 ## Input
 
-One Fortran-namelist file holds every parameter: [`input/uniform.nml`](input/uniform.nml) and [`input/agglomerate.nml`](input/agglomerate.nml), each at its defaults. `&model particle_model` chooses the model. [docs/parameters.md](docs/parameters.md) lists each parameter with its unit, origin and, for the public defaults, the reason for the value. The Fortran program reads the files natively; the C++ and Python implementations parse the same format.
+One Fortran-namelist file holds every parameter: [`input/uniform.nml`](input/uniform.nml), [`input/crystal.nml`](input/crystal.nml) and [`input/agglomerate.nml`](input/agglomerate.nml), each at its defaults. `&model particle_model` chooses the model. [docs/parameters.md](docs/parameters.md) lists each parameter with its unit, origin and, for the public defaults, the reason for the value. The Fortran program reads the files natively; the C++ and Python implementations parse the same format.
 
 A cycling protocol goes in a `&protocol` group ([docs/protocol.md](docs/protocol.md)):
 

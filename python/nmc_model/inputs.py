@@ -1,7 +1,8 @@
 """Read the shared input file for either particle model, and run it.
 
 The Fortran and C++ programs read the same file. `&model particle_model` chooses the model:
-'uniform' (the default) or 'agglomerate'. See input/*.nml and docs/parameters.md.
+'uniform' (the default), 'crystal' (the uniform model with solid diffusion in the crystals) or 'agglomerate'.
+See input/*.nml and docs/parameters.md.
 """
 from __future__ import annotations
 
@@ -14,11 +15,12 @@ from .uniform import namelist as _unl
 # namelist name -> AggParams field, per group
 AGG_NAMES = {
     "cell": {"l_cath_um": "thickness_um", "l_sep": "L_sep", "nj": "nj", "sep_node": "sep_node", "eps": "eps",
-             "eps_sep": "eps_sep", "tau_sep": "tau_sep", "bruggeman": "bruggeman", "eps_am": None},
+             "eps_sep": "eps_sep", "tau_sep": "tau_sep", "bruggeman": "bruggeman", "eps_am": None, "nj_crystal": None},
     "electrolyte": {"d": "D0", "t_plus": "t_plus", "c_bulk": "c_bulk", "kappa_bg": "kappa_bg", "z_plus": None,
                     "z_minus": None},
     "active": {"sigma": "sigma", "m": "M", "rho": "rho", "q_th": "Q_th", "k_rxn": "rxn_k", "alpha_a": "alpha_a",
-               "alpha_c": "alpha_c", "k_li": "k_Li", "c_li_ref": "c_Li_ref", "r_p": None},
+               "alpha_c": "alpha_c", "k_li": "k_Li", "c_li_ref": "c_Li_ref", "r_p": None, "crystal_shape": None,
+               "d_c": None},
     "constants": {"r": "R", "t": "T", "f": "F"},
     "operation": {"c_rate": "C_rate", "phi1_init": "phi1_init", "cs_init": "cs_init", "t_max": "t_max",
                   "v_min": "V_min", "v_max": "V_max", "phi2_init": None, "n_steps": None},
@@ -50,14 +52,19 @@ def load(path):
     data = _unl.parse(text)
     model = str(data.pop("model", {}).get("particle_model", "uniform")).lower()
     out_file = data.get("output", {}).get("file", "Time_Voltage.txt")
-    if model == "uniform":
+    if model in ("uniform", "crystal"):
         if "agglomerate" in data:
             raise ValueError("&agglomerate is only for particle_model = 'agglomerate'")
+        if model == "crystal" and str(data.get("numerics", {}).get("mode", "faithful")).lower() == "faithful":
+            raise ValueError("particle_model='crystal' needs mode='corrected'")
         p, extra = _unl.from_dict(data)
+        if model == "crystal":
+            from dataclasses import replace
+            p = replace(p, particle_model="crystal")
         _check_mesh(p, model)
         return p, model, extra.get("file", out_file)
     if model != "agglomerate":
-        raise ValueError("particle_model must be 'uniform' or 'agglomerate'")
+        raise ValueError("particle_model must be 'uniform', 'crystal' or 'agglomerate'")
     values = {}
     for group, entries in data.items():
         if group not in AGG_NAMES:

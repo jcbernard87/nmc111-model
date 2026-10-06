@@ -22,7 +22,10 @@ program nmc
     integer, parameter :: IC = 1, IP1 = 2, IP2 = 3, ICS = 4
 
     ! ---------------- parameters (defaults = original research code) ----------------
-    character(len=16) :: particle_model = 'uniform'    ! 'uniform' or 'agglomerate'
+    character(len=16) :: particle_model = 'uniform'    ! 'uniform', 'crystal' or 'agglomerate'
+    character(len=16) :: crystal_shape = 'sphere'      ! crystal model: 'sphere', 'cylinder' or 'slab'
+    real(dp) :: D_c = 5.162e-12_dp                     ! crystal model: solid diffusivity [cm2/s] (the original's diff_c)
+    integer  :: nj_crystal = 21                        ! crystal model: nodes across a crystal (center and surface included)
     real(dp) :: L_cath_um = 24.0_dp, L_sep = 25.0e-4_dp   ! cathode thickness in um
     real(dp) :: L_cath                                    ! [cm], derived in setup
     integer  :: nj = 43, sep_node = 22
@@ -49,10 +52,10 @@ program nmc
     character(len=256) :: file = 'Time_Voltage.txt'
 
     namelist /model/ particle_model
-    namelist /cell/ L_cath_um, L_sep, nj, sep_node, eps, eps_AM, eps_sep, tau_sep, bruggeman
+    namelist /cell/ L_cath_um, L_sep, nj, sep_node, eps, eps_AM, eps_sep, tau_sep, bruggeman, nj_crystal
     real(dp) :: kappa_bg = 1.0e-8_dp                   ! corrected: background (solvent) ionic conductivity [S/cm]
     namelist /electrolyte/ D, t_plus, c_bulk, z_plus, z_minus, kappa_bg
-    namelist /active/ sigma, M, rho, Q_th, R_p, k_rxn, alpha_a, alpha_c, k_Li, c_Li_ref
+    namelist /active/ sigma, M, rho, Q_th, R_p, k_rxn, alpha_a, alpha_c, k_Li, c_Li_ref, crystal_shape, D_c
     namelist /constants/ R, T, F
     namelist /operation/ C_rate, phi1_init, phi2_init, cs_init, t_max, n_steps, V_min, V_max
     namelist /numerics/ fd_step, newton_tol, newton_max_iter, mode, dt_mode, rtol, atol, dt_min, dt_max
@@ -84,6 +87,12 @@ program nmc
     real(dp) :: dt_s = 1.0_dp                     ! corrected: time step [s]
     namelist /agglomerate/ nja, time_mod, R_agg, R_xtal, eps_agg, D_agg, tortuosity_e, mass_loading, &
         percent_active, mol_vol, c0_init, tau_agg, sigma_agg, dt_s
+    ! crystal model (particle_model = 'crystal', corrected mode; xtal_*): solid diffusion in the uniform model's particles
+    logical :: xtal = .false.
+    integer :: nlx = 0                             ! crystals: one per cathode volume, electrode nodes s+1 .. nj-1
+    real(dp) :: xtal_h, xtal_AR, a_xt              ! crystal mesh step, surface area R_p**k, crystal area per volume
+    real(dp), allocatable :: xtal_V(:), xtal_A(:)  ! node volumes and face areas (vertex-centred)
+    real(dp), allocatable :: xc(:,:), xc_start(:,:)   ! crystal log-odds (nj_crystal, nlx)
     ! corrected agglomerate model (aggc_*)
     logical :: aggc = .false.
     integer :: nl                                  ! cathode volumes, one agglomerate each
@@ -150,6 +159,16 @@ program nmc
     end if
     select case (trim(particle_model))
     case ('uniform')
+    case ('crystal')
+        if (trim(mode) == 'faithful') then
+            write(error_unit,'(A)') 'particle_model=''crystal'' needs mode=''corrected'''
+            error stop 2
+        end if
+        if (nj_crystal < 4) then
+            write(error_unit,'(A,I0)') 'nj_crystal must be at least 4, got ', nj_crystal
+            error stop 2
+        end if
+        xtal = .true.
     case ('agglomerate')
         if (trim(mode) == 'faithful') then
             call agg_main()
@@ -159,7 +178,14 @@ program nmc
         eps_AM = 0.0_dp            ! the electrode scale has no active material of its own
         if (k_rxn < 0) k_rxn = 2.5e-6_dp       ! before setup(), which would use the uniform default
     case default
-        write(error_unit,'(A)') 'particle_model must be ''uniform'' or ''agglomerate'''
+        write(error_unit,'(A)') 'particle_model must be ''uniform'', ''crystal'' or ''agglomerate'''
+        error stop 2
+    end select
+    select case (trim(crystal_shape))
+    case ('slab', 'cylinder', 'sphere')
+    case default
+        write(error_unit,'(A)') 'crystal_shape must be one of (''slab'', ''cylinder'', ''sphere''), got '''// &
+            trim(crystal_shape)//''''
         error stop 2
     end select
     call setup()
@@ -177,9 +203,11 @@ program nmc
     mAhg = 0.0_dp
     dt = t_max/real(n_steps, dp)
     if (aggc) call aggc_setup()
+    call xtal_setup()
     if (.not. faithful) then                   ! corrected mode: u = ln(c/c_bulk) and the particles' log-odds
         c(IC,:) = 0.0_dp
         if (.not. aggc) c(ICS,:) = log((cs_init/cs_max())/(1.0_dp - cs_init/cs_max()))
+        if (xtal) xc = log((cs_init/cs_max())/(1.0_dp - cs_init/cs_max()))
     end if
     exit_reason = 'max_steps'
 
@@ -407,7 +435,7 @@ contains
         ! adaptive steps (see driver.py): the next step, the step before this one and its start state
         logical :: adaptive, have_prev, clipped
         real(dp) :: h_next, h_max, hp, I_start, err, fac
-        real(dp), allocatable :: c0(:,:), cag0(:,:,:), cp(:,:), cagp(:,:,:)
+        real(dp), allocatable :: c0(:,:), cag0(:,:,:), cp(:,:), cagp(:,:,:), xc0(:,:), xcp(:,:)
 
         adaptive = trim(dt_mode) == 'adaptive'
         h_max = write_interval
@@ -417,6 +445,7 @@ contains
             allocate(cag0, mold=cag)
             allocate(cagp, mold=cag)
         end if
+        allocate(xc0(nj_crystal,nlx), xcp(nj_crystal,nlx))
 
         I = 0.0_dp
         if (skind(1) == K_CC) I = sC(1)*i_1C
@@ -443,6 +472,7 @@ contains
                     I_start = I
                     c0 = c
                     if (aggc) cag0 = cag
+                    if (xtal) xc0 = xc
                 else
                     h = dt
                     if (sT(k) >= 0) h = min(dt, sT(k) - t_step)
@@ -475,12 +505,13 @@ contains
                 if (adaptive .and. .not. stopped) then
                     fac = 2.0_dp
                     if (have_prev) then
-                        err = local_error(c0, cp, cag0, cagp, h_done, hp)
+                        err = local_error(c0, cp, cag0, cagp, xc0, xcp, h_done, hp)
                         if (err /= 0.0_dp) fac = min(2.0_dp, max(0.2_dp, 0.9_dp/sqrt(err)))
                         if (err > 1.0_dp .and. h_done > dt_min) then
                             h_next = max(dt_min, h_done*fac)      ! redo the step, shorter
                             c = c0
                             if (aggc) cag = cag0
+                            if (xtal) xc = xc0
                             I = I_start
                             i_app = I
                             cycle
@@ -488,6 +519,7 @@ contains
                     end if
                     cp = c0
                     if (aggc) cagp = cag0
+                    if (xtal) xcp = xc0
                     hp = h_done
                     have_prev = .true.
                     if (.not. (clipped .and. fac >= 1.0_dp)) h_next = max(dt_min, h_done*fac)
@@ -533,11 +565,11 @@ contains
         nsolve = nsteps_done
     end subroutine run_protocol
 
-    real(dp) function local_error(c0, cp, cag0, cagp, h, hp)
+    real(dp) function local_error(c0, cp, cag0, cagp, xc0, xcp, h, hp)
         !! Backward Euler's local error estimate (driver.py): h/(h + hp) times the weighted RMS of the new state
-        !! (c, and cag in the agglomerate model) less the linear predictor through cp (hp before c0) and c0;
-        !! weights atol + rtol*|x|. cag0 and cagp are only referenced in the agglomerate model.
-        real(dp), intent(in) :: c0(:,:), cp(:,:), h, hp
+        !! (c, and cag in the agglomerate model or xc in the crystal model) less the linear predictor through cp
+        !! (hp before c0) and c0; weights atol + rtol*|x|. cag0, cagp and xc0, xcp are referenced only in their model.
+        real(dp), intent(in) :: c0(:,:), cp(:,:), xc0(:,:), xcp(:,:), h, hp
         real(dp), allocatable, intent(in) :: cag0(:,:,:), cagp(:,:,:)
         real(dp) :: s, pred
         integer :: j, v, l, q, n
@@ -561,6 +593,15 @@ contains
                 end do
             end do
         end if
+        if (xtal) then
+            do l = 1, nlx
+                do q = 1, nj_crystal
+                    pred = xc0(q,l) + (h/hp)*(xc0(q,l) - xcp(q,l))
+                    s = s + ((xc(q,l) - pred)/(atol + rtol*abs(xc(q,l))))**2
+                    n = n + 1
+                end do
+            end do
+        end if
         local_error = h/(h + hp)*sqrt(s/real(n, dp))
     end function local_error
 
@@ -571,15 +612,17 @@ contains
         real(dp), intent(inout) :: I
         logical, intent(out) :: ok
         real(dp), intent(out) :: h_done
-        real(dp) :: I_guess, c_begin(NV,nj)
+        real(dp) :: I_guess, c_begin(NV,nj), xc_begin(nj_crystal,nlx)
         real(dp), allocatable :: cag_begin(:,:,:)
         I_guess = I
         c_begin = c
         if (aggc) cag_begin = cag
+        if (xtal) xc_begin = xc
         h_done = h
         do
             c = c_begin
             if (aggc) cag = cag_begin
+            if (xtal) xc = xc_begin
             I = I_guess
             call cv_step(h_done, V_set, I, ok)
             if (ok) return
@@ -588,6 +631,7 @@ contains
         end do
         c = c_begin
         if (aggc) cag = cag_begin
+        if (xtal) xc = xc_begin
         I = I_guess
         h_done = 0.0_dp
     end subroutine cv_advance
@@ -603,6 +647,7 @@ contains
         integer :: it, side
         c_start = c
         if (aggc) cag_start = cag
+        if (xtal) xc_start = xc
         ok = .false.
         call cv_feval(h, V_set, c_start, I, fI, good)
         if (good .and. abs(fI) <= tol) then
@@ -640,6 +685,7 @@ contains
         if (.not. (have_a .and. have_b)) then
             c = c_start
             if (aggc) cag = cag_start
+            if (xtal) xc = xc_start
             return
         end if
         side = 0
@@ -658,6 +704,7 @@ contains
                 if (.not. ok) then
                     c = c_start
                     if (aggc) cag = cag_start
+                    if (xtal) xc = xc_start
                 end if
                 return
             end if
@@ -673,6 +720,7 @@ contains
         end do
         c = c_start
         if (aggc) cag = cag_start
+        if (xtal) xc = xc_start
     end subroutine cv_step
 
     subroutine cv_feval(h, V_set, c_start, Itry, fval, success)
@@ -682,6 +730,7 @@ contains
         logical, intent(out) :: success
         c = c_start
         if (aggc) cag = cag_start
+        if (xtal) xc = xc_start
         i_app = Itry
         call newton_step(h, success)
         if (success) then
@@ -1039,6 +1088,8 @@ contains
         logical, intent(out) :: ok
         if (aggc) then
             call aggc_newton(h, ok)
+        else if (xtal) then
+            call xtal_newton(h, ok)
         else
             call lu_newton(h, ok)
         end if
@@ -1061,7 +1112,7 @@ contains
         real(dp), intent(out) :: t_done
         logical, intent(out) :: stopped, ok
         real(dp), parameter :: min_dt = 1.0e-10_dp, event_dv = 1.0e-4_dp, event_min_dt = 1.0e-12_dp
-        real(dp) :: hh, vv, mg, c_save(NV,nj)
+        real(dp) :: hh, vv, mg, c_save(NV,nj), xc_save(nj_crystal,nlx)
         real(dp), allocatable :: cag_save(:,:,:)
         integer, parameter :: max_failures = 200     ! Newton failures allowed within one step
         integer :: failures
@@ -1080,6 +1131,7 @@ contains
             hh = min(hh, dt - t_done)
             c_save = c
             if (aggc) cag_save = cag
+            if (xtal) xc_save = xc
             call newton_step(hh, good)
             if (.not. good) then
                 failures = failures + 1
@@ -1087,6 +1139,7 @@ contains
                     ok = .false.
                     c = c_save                 ! give up: keep the last converged sub-step
                     if (aggc) cag = cag_save
+                    if (xtal) xc = xc_save
                     return
                 end if
                 hh = hh/2
@@ -1105,6 +1158,7 @@ contains
                     if (mg < -event_dv .and. hh/2 >= event_min_dt) then
                         c = c_save
                         if (aggc) cag = cag_save
+                        if (xtal) xc = xc_save
                         hh = hh/2
                         cycle
                     end if
@@ -1305,6 +1359,9 @@ contains
             cmin = min(cmin, c_bulk*exp(minval(cag(IC,:,:))))
             thmin = sigm(minval(cag(ICS,:,:)))
             thmax = sigm(maxval(cag(ICS,:,:)))
+        else if (xtal) then                      ! the crystal surfaces, where the reaction is
+            thmin = sigm(minval(xc(nj_crystal,:)))
+            thmax = sigm(maxval(xc(nj_crystal,:)))
         else
             thmin = sigm(minval(c(ICS,s:nj)))
             thmax = sigm(maxval(c(ICS,s:nj)))
@@ -1321,17 +1378,26 @@ contains
     end function limit_reason
 
     logical function aggc_nan()
+        !! NaN in the agglomerate model's or the crystal model's own unknowns.
         aggc_nan = .false.
         if (aggc) aggc_nan = any(ieee_is_nan(cag))
+        if (xtal) aggc_nan = any(ieee_is_nan(xc))
     end function aggc_nan
 
     subroutine write_row_c(header, step)
-        !! Corrected-mode output row: the original columns plus the current and the step index.
+        !! Corrected-mode output row: the original columns plus the current and the step index; with the crystal
+        !! model also the surface and volume-mean theta of the crystals next to the separator and the collector.
         logical, intent(in) :: header
         integer, intent(in) :: step
-        real(dp) :: i0_li, eta
+        real(dp) :: i0_li, eta, th(4)
         character(len=1) :: st
-        if (header .and. aggc) then
+        if (header .and. xtal) then
+            write(ounit,'(A5,1X,2(A12,1X),20(A15,1X))') 'State', 'Time', 'Voltage', 'Equivalence', 'Anode_Eta', &
+                'anode_exchange_c', 'Edge_c0', 'Current', 'Step', 'Li_Nernst', 'Th_surf_sep', 'Th_mean_sep', &
+                'Th_surf_col', 'Th_mean_col'
+            write(ounit,'(A5,1X,2(A12,1X),20(A15,1X))') 'CDR', 'hours', 'Volts', 'electron_equivs', 'mV', &
+                'mA/cm2', 'mol/cm3', 'mA/cm2', '#', 'mV', '-', '-', '-', '-'
+        else if (header .and. aggc) then
             write(ounit,'(A5,1X,2(A12,1X),20(A15,1X))') 'State', 'Time', 'Voltage', 'Equivalence', 'Anode_Eta', &
                 'anode_exchange_c', 'Edge_c0', 'Current', 'Step', 'Li_Nernst', 'x_front', 'c_collector'
             write(ounit,'(A5,1X,2(A12,1X),20(A15,1X))') 'CDR', 'hours', 'Volts', 'electron_equivs', 'mV', &
@@ -1347,7 +1413,11 @@ contains
         if (i_app < 0) st = 'C'
         i0_li = F*k_Li*(c_foil()**0.5_dp)*(c_Li_ref**0.5_dp)
         eta = li_eta()
-        if (aggc) then
+        if (xtal) then
+            th = crystal_thetas()
+            write(ounit,'(A5,1X,2(F12.5,1X),5(ES15.5,1X),I15,5(1X,ES15.5))') st, time/3600.0_dp, cell_voltage(), &
+                mAhg*M*3.6_dp/F, eta*1.0e3_dp, i0_li*1.0e3_dp, c_foil(), i_app*1.0e3_dp, step, li_nernst()*1.0e3_dp, th
+        else if (aggc) then
             write(ounit,'(A5,1X,2(F12.5,1X),5(ES15.5,1X),I15,3(1X,ES15.5))') st, time/3600.0_dp, cell_voltage(), &
                 mAhg*M*3.6_dp/F, eta*1.0e3_dp, i0_li*1.0e3_dp, c_foil(), i_app*1.0e3_dp, step, li_nernst()*1.0e3_dp, &
                 csmax_a*sigm(cag(ICS,na,1))/mol_vol, c_bulk*exp(c(IC,nj))
@@ -2095,6 +2165,204 @@ contains
         end do
         c = c_old
     end subroutine lu_newton
+
+    ! ------------------------------------------------------------------ crystal model
+    pure real(dp) function ipow(x, n)
+        !! x**n by repeated multiplication (the same rounding as the C++ program)
+        real(dp), intent(in) :: x
+        integer, intent(in) :: n
+        integer :: q
+        ipow = 1.0_dp
+        do q = 1, n
+            ipow = ipow*x
+        end do
+    end function ipow
+
+    subroutine xtal_setup()
+        !! The crystal model's mesh (see crystal.py in Python): vertex-centred finite volumes, nodes at r_j = j h,
+        !! volumes over [r_j - h/2, r_j + h/2] in [0, R_p]; one crystal per cathode volume, electrode nodes s+1 .. nj-1.
+        integer :: k, j
+        real(dp) :: rr, rW, rE
+        nlx = 0
+        allocate(xc(nj_crystal, 0), xc_start(nj_crystal, 0))
+        if (.not. xtal) return
+        select case (trim(crystal_shape))
+        case ('slab');     k = 0
+        case ('cylinder'); k = 1
+        case default;      k = 2
+        end select
+        nlx = nj - 1 - s
+        deallocate(xc, xc_start)
+        allocate(xc(nj_crystal, nlx), xc_start(nj_crystal, nlx))
+        xtal_h = R_p/real(nj_crystal - 1, dp)
+        allocate(xtal_V(nj_crystal), xtal_A(nj_crystal - 1))
+        do j = 1, nj_crystal
+            rr = xtal_h*real(j - 1, dp)
+            if (j == nj_crystal) rr = R_p
+            rW = max(rr - xtal_h/2.0_dp, 0.0_dp)
+            rE = min(rr + xtal_h/2.0_dp, R_p)
+            xtal_V(j) = (ipow(rE, k + 1) - ipow(rW, k + 1))/real(k + 1, dp)
+        end do
+        do j = 1, nj_crystal - 1
+            xtal_A(j) = ipow(xtal_h*(real(j - 1, dp) + 0.5_dp), k)
+        end do
+        xtal_AR = ipow(R_p, k)
+        a_xt = real(k + 1, dp)*vf_AM/R_p
+    end subroutine xtal_setup
+
+    subroutine xtal_rows(l, dt, xcold, Rc, Bc, Dc_, Ac)
+        !! Crystal l's rows without the reaction (diffusion_rows in Python): storage plus the net outward
+        !! diffusive flux of each control volume, and the tridiagonal dR/ds.
+        integer, intent(in) :: l
+        real(dp), intent(in) :: dt, xcold(nj_crystal)
+        real(dp), intent(out) :: Rc(nj_crystal), Bc(nj_crystal), Dc_(nj_crystal), Ac(nj_crystal)
+        real(dp) :: th(nj_crystal), dth(nj_crystal), gx(nj_crystal-1), Jf(nj_crystal-1), csm
+        integer :: q, nc
+        nc = nj_crystal
+        csm = cs_max()
+        do q = 1, nc
+            th(q) = sigm(xc(q,l))
+            dth(q) = th(q)*sigm(-xc(q,l))
+            Rc(q) = csm*xtal_V(q)*(th(q) - sigm(xcold(q)))/dt
+            Bc(q) = csm*xtal_V(q)*dth(q)/dt
+        end do
+        do q = 1, nc - 1
+            gx(q) = D_c*csm*xtal_A(q)/xtal_h
+            Jf(q) = -gx(q)*(th(q+1) - th(q))
+        end do
+        Dc_ = 0.0_dp; Ac = 0.0_dp
+        do q = 1, nc - 1
+            Rc(q) = Rc(q) + Jf(q)
+            Bc(q) = Bc(q) + gx(q)*dth(q)
+            Dc_(q) = -gx(q)*dth(q+1)
+        end do
+        do q = 2, nc
+            Rc(q) = Rc(q) - Jf(q-1)
+            Bc(q) = Bc(q) + gx(q-1)*dth(q)
+            Ac(q) = -gx(q-1)*dth(q-1)
+        end do
+    end subroutine xtal_rows
+
+    subroutine xtal_newton(h, ok)
+        !! One backward-Euler step with crystals, solved by the condensed Newton iteration (see
+        !! CrystalModel.newton_step in Python): each iteration solves the stacked crystal systems for the
+        !! update and the three surface responses to the electrode's (u, phi1, phi2), folds them into the
+        !! electrode's diagonal blocks, solves the electrode, and back-substitutes. c and xc are updated
+        !! on success.
+        real(dp), intent(in) :: h
+        logical, intent(out) :: ok
+        integer :: nc, ntot, k, l, j, q, kk, fl, st
+        real(dp) :: c_old(NV,nj), xc_old(nj_crystal,nlx), lam, upd, prev, raw, mx, th
+        real(dp) :: y(NV), i, di(NV), w, sgn(3), gcpl(3,nlx), Jce(3,nlx), sc
+        real(dp) :: Rc(nj_crystal), Bc(nj_crystal), Dqx(nj_crystal), Aqx(nj_crystal)
+        real(dp) :: A1(1,1,nj_crystal*nlx), B1(1,1,nj_crystal*nlx), D1(1,1,nj_crystal*nlx)
+        real(dp) :: rhs(1,nj_crystal*nlx,0:3), sol(1,nj_crystal*nlx,0:3), dxc(nj_crystal,nlx)
+        nc = nj_crystal
+        ntot = nc*nlx
+        sgn = [-1.0_dp/F, 1.0_dp, -1.0_dp]           ! reaction sign in rows IC, IP1, IP2
+        c_old = c
+        xc_old = xc
+        ok = .false.
+        prev = huge(1.0_dp)
+        do k = 1, newton_max_iter
+            call lel_assemble(c, c_old, h, i_app, .false.)
+            rhs = 0.0_dp
+            do l = 1, nlx
+                j = s + l
+                y = c(:,j)
+                y(ICS) = xc(nc,l)
+                call lrate(y, .false., i, di)
+                w = a_xt*dx(j)
+                do fl = 1, 3
+                    G(fl,j) = G(fl,j) - (w*i)*sgn(fl)
+                    B(fl,1:3,j) = B(fl,1:3,j) + (w*sgn(fl))*di(1:3)
+                    gcpl(fl,l) = (w*di(ICS))*sgn(fl)
+                    Jce(fl,l) = xtal_AR*di(fl)/F
+                end do
+                call xtal_rows(l, h, xc_old(:,l), Rc, Bc, Dqx, Aqx)
+                Rc(nc) = Rc(nc) + xtal_AR*i/F
+                Bc(nc) = Bc(nc) + xtal_AR*di(ICS)/F
+                do q = 1, nc
+                    sc = abs(Bc(q))
+                    if (sc == 0.0_dp) sc = 1.0_dp
+                    A1(1,1,(l-1)*nc+q) = Aqx(q)/sc
+                    B1(1,1,(l-1)*nc+q) = Bc(q)/sc
+                    D1(1,1,(l-1)*nc+q) = Dqx(q)/sc
+                    rhs(1,(l-1)*nc+q,0) = -Rc(q)/sc
+                    if (q == nc) then
+                        do kk = 1, 3
+                            rhs(1,(l-1)*nc+q,kk) = -Jce(kk,l)/sc
+                        end do
+                    end if
+                end do
+            end do
+            do kk = 0, 3
+                call band_solve(1, ntot, A1, B1, D1, rhs(:,:,kk), sol(:,:,kk), st)
+                if (st /= BAND_OK) exit
+            end do
+            if (st /= BAND_OK) exit
+            ! condense the crystals into the electrode's diagonal blocks
+            do l = 1, nlx
+                j = s + l
+                do fl = 1, 3
+                    do kk = 1, 3
+                        B(fl,kk,j) = B(fl,kk,j) + gcpl(fl,l)*sol(1,l*nc,kk)
+                    end do
+                    G(fl,j) = G(fl,j) - gcpl(fl,l)*sol(1,l*nc,0)
+                end do
+            end do
+            call equilibrate()
+            call band_solve(NV, nj, A, B, Dm, G, dc, st)
+            if (st /= BAND_OK) exit
+            do l = 1, nlx
+                j = s + l
+                do q = 1, nc
+                    dxc(q,l) = sol(1,(l-1)*nc+q,0) + sol(1,(l-1)*nc+q,1)*dc(1,j) &
+                               + sol(1,(l-1)*nc+q,2)*dc(2,j) + sol(1,(l-1)*nc+q,3)*dc(3,j)
+                end do
+            end do
+            lam = lbounded(dc)
+            mx = maxval(abs(dxc))
+            if (mx > 2.0_dp) lam = min(lam, 2.0_dp/mx)
+            ! divergence is judged on the damped electrode update: near theta = 0 or 1 a linearized
+            ! log-odds update of the crystals is legitimately huge, and through the condensation it also
+            ! inflates the undamped electrode update; the step limit scales both down
+            raw = lam*maxval(abs(dc))
+            c = c + lam*dc
+            xc = xc + lam*dxc
+            upd = 0.0_dp
+            do j = 1, nj
+                upd = max(upd, exp(c(IC,j))*abs(dc(IC,j)), abs(dc(IP1,j)), abs(dc(IP2,j)))
+            end do
+            do l = 1, nlx
+                do q = 1, nc
+                    th = sigm(xc(q,l))
+                    upd = max(upd, th*sigm(-xc(q,l))*abs(dxc(q,l)))
+                end do
+            end do
+            if (.not. ieee_is_finite(raw) .or. raw > 1.0e3_dp) exit
+            if (lam == 1.0_dp .and. converged(upd, prev)) then
+                ok = .true.
+                return
+            end if
+            prev = upd
+        end do
+        c = c_old
+        xc = xc_old
+    end subroutine xtal_newton
+
+    function crystal_thetas() result(th)
+        !! Surface and volume-mean theta of the first (separator side) and last (collector side) crystal.
+        real(dp) :: th(4), vtot, ms, mc
+        integer :: j
+        vtot = 0.0_dp; ms = 0.0_dp; mc = 0.0_dp
+        do j = 1, nj_crystal
+            vtot = vtot + xtal_V(j)
+            ms = ms + xtal_V(j)*sigm(xc(j,1))
+            mc = mc + xtal_V(j)*sigm(xc(j,nlx))
+        end do
+        th = [sigm(xc(nj_crystal,1)), ms/vtot, sigm(xc(nj_crystal,nlx)), mc/vtot]
+    end function crystal_thetas
 
     ! ------------------------------------------------------------------ agglomerate model
     subroutine aggc_setup()

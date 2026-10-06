@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Crystal model** (`particle_model = 'crystal'`, corrected mode, all three languages; #4): the uniform model with solid-state diffusion in each cathode volume's crystal (sphere, cylinder or slab), ported from lfp-model: Fick's law in the log-odds, vertex-centred finite volumes in r, the crystals condensed into the electrode's Newton step. Default `D_c` = 5.162 × 10⁻¹² cm²/s, the original program's value. Four more output columns (surface and mean θ of the crystals next to the separator and the collector); `input/crystal.nml`. Fortran and C++ byte-identical, Python to the printed precision; validated as in lfp-model (exact constant-flux solution, second order in r and x, first order in t, conservation, the full Jacobian, the uniform limit).
 - **Adaptive time stepping** (corrected mode, both models, all three languages; #8): `dt_mode = 'adaptive'` chooses each time step from backward Euler's local error estimate (linear predictor), against `rtol` and `atol`, within `dt_min` and `dt_max`; steps land on the output times. Agglomerate runs stay byte-identical across Python, Fortran and C++. The default stays `dt_mode = 'fixed'`, so existing inputs give the same output.
 
 ## 0.2.1 (2026-10-05)

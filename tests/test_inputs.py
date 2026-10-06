@@ -62,7 +62,12 @@ def test_faithful_needs_the_fitted_values(model, missing, fortran_exe, cpp_exe, 
 
 
 BAD = [
-    ("&model\n  particle_model = 'agglomerat'\n/\n", "particle_model must be 'uniform' or 'agglomerate'"),
+    ("&model\n  particle_model = 'agglomerat'\n/\n", "particle_model must be 'uniform', 'crystal' or 'agglomerate'"),
+    ("&model\n  particle_model = 'crystal'\n/\n&cell\n  nj_crystal = 3\n/\n", "nj_crystal must be at least 4, got 3"),
+    ("&active\n  crystal_shape = 'sphre'\n/\n",
+     "crystal_shape must be one of ('slab', 'cylinder', 'sphere'), got 'sphre'"),
+    ("&model\n  particle_model = 'crystal'\n/\n&numerics\n  mode = 'faithful'\n/\n",
+     "particle_model='crystal' needs mode='corrected'"),
     ("&numerics\n  mode = 'correctd'\n/\n", "mode must be 'faithful' or 'corrected'"),
     ("&protocol\n  steps = 'cx C=1'\n/\n", "unknown step type"),
     ("&cell\n  nj = 30, sep_node = 2\n/\n", "sep_node must be at least 3"),

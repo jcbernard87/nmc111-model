@@ -19,7 +19,7 @@ Same parameter set and meaning as lfp-model ([its parameters.md](https://github.
 | `volfrac_AM` | 0.4 | | C:L118 | with ε = 0.5 |
 | `sep_tortuosity` | 4.8 | | C:L110 | |
 | `Phi_1_init` | 4.1 | V | C:L79 | |
-| `diff_c` | 5.162 × 10⁻¹² | cm²/s | C:L97 | used only by the inactive crystal scale |
+| `diff_c` | 5.162 × 10⁻¹² | cm²/s | C:L97 | used only by the inactive crystal scale; the default `D_c` of the corrected crystal model |
 | OCP | 11-term Redlich–Kister, U_ref = 3.8685682447595453, x_max = 0.55 | | C:L145–L179 | see model.md §2 |
 | `cimax` | 0.55·ρ/M | mol/cm³ | C:L197 | |
 | `C_rate` | 1.0 | 1/h | C:L123 | |
@@ -84,5 +84,16 @@ The defaults of `AggParams` and of the `&agglomerate` input. Values not listed a
 | `dt_mode` | `'fixed'` | `'adaptive'` chooses the time step from the local error estimate (docs/protocol.md; #8). Both models, corrected mode |
 | `rtol`, `atol` | 10⁻⁴, 10⁻⁴ | adaptive: local error tolerances on the state (ln c, potentials in V, log-odds of θ) |
 | `dt_min`, `dt_max` | 10⁻⁶ s, 0 | adaptive: step bounds; `dt_max = 0` means `write_interval` |
+
+
+## Crystal model: inputs (corrected mode, `particle_model = 'crystal'`)
+
+The uniform model's inputs, plus:
+
+| Input | Default | Why |
+|---|---|---|
+| `crystal_shape` | `'sphere'` | `'sphere'`, `'cylinder'` or `'slab'`; `R_p` is the radius (a slab's half-thickness) |
+| `D_c` | 5.162 × 10⁻¹² cm²/s | the original program's own value for its inactive crystal scale (`diff_c`, C:L97); R_p²/D_c ≈ 78 s for R_p = 200 nm |
+| `nj_crystal` | 21 | nodes across a crystal, centre and surface included (at least 4) |
 
 The notebook `agglomerate_vs_uniform` shows how the results depend on σ, k and the agglomerate transport.

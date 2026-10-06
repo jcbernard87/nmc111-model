@@ -20,9 +20,10 @@ from dataclasses import fields
 from .params import Params, f32
 
 GROUPS = {
-    "cell": ["L_cath_um", "L_sep", "nj", "sep_node", "eps", "eps_AM", "eps_sep", "tau_sep", "bruggeman"],
+    "cell": ["L_cath_um", "L_sep", "nj", "sep_node", "eps", "eps_AM", "eps_sep", "tau_sep", "bruggeman", "nj_crystal"],
     "electrolyte": ["D", "t_plus", "c_bulk", "z_plus", "z_minus", "kappa_bg"],
-    "active": ["sigma", "M", "rho", "Q_th", "R_p", "k_rxn", "alpha_a", "alpha_c", "k_Li", "c_Li_ref"],
+    "active": ["sigma", "M", "rho", "Q_th", "R_p", "k_rxn", "alpha_a", "alpha_c", "k_Li", "c_Li_ref", "crystal_shape",
+               "D_c"],
     "constants": ["R", "T", "F"],
     "operation": ["C_rate", "phi1_init", "phi2_init", "cs_init", "t_max", "n_steps", "V_min", "V_max"],
     "numerics": ["fd_step", "newton_tol", "newton_max_iter", "mode", "dt_mode", "rtol", "atol", "dt_min", "dt_max"],

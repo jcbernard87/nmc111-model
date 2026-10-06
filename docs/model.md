@@ -1,6 +1,6 @@
 # NMC111 model: equations and discretization
 
-Sections 1–5 describe the two models **as implemented in the original research code**, which is the reference for the faithful mode. Sections 6 and 7 describe the corrected mode. Suspected defects are marked **[D-n]** and tracked in [deviations.md](deviations.md). Line references point into the private reference copies of the original programs, which are not distributed:
+Sections 1–5 describe the two models **as implemented in the original research code**, which is the reference for the faithful mode. Sections 6–8 and 10 describe the corrected mode. Suspected defects are marked **[D-n]** and tracked in [deviations.md](deviations.md). Line references point into the private reference copies of the original programs, which are not distributed:
 
 - `A:Lnnn`: the agglomerate model, conductivity-study template (`NMC111_agg.f95`)
 - `C:Lnnn`: the uniform-particle ("electrode–crystal") model (`NMC111_Electrode_Crystal.f95`)
@@ -189,3 +189,30 @@ This is exact for a constant flux in a constant field between the nodes, keeps c
 | `NMC111_Electrode_Crystal.f95`, "questions" copy (Jan 2021) | the reference for the uniform-particle model; reproduces the archived output byte for byte |
 | Blackbox Testing copy | command-line variant (thickness, C-rate, label) used for black-box optimization; the same model |
 | Old Work copy | debugging copy: it has the corrected Li-foil Φ₁ sign but also an interface current row that adds the two face currents instead of subtracting them, and it diverges within 36 s. Not ported |
+
+## 10. Crystal model (`particle_model = 'crystal'`, corrected mode)
+
+With `particle_model = 'crystal'` each cathode volume (electrode nodes between the interface and the collector) carries one representative crystal with solid-state diffusion, instead of a uniform particle. The original uniform-particle program has a crystal scale, switched off (§3); it is not ported. This model is lfp-model's crystal model (its `docs/model.md` §12) with NMC111's kinetics; the electrode scale is the corrected uniform model's (§8).
+
+**Geometry.** `crystal_shape` = `slab`, `cylinder` or `sphere` (k = 0, 1, 2), with size R_p (the half-thickness of a slab, the radius otherwise). The crystal surface per electrode volume is a = (k+1)·ε_AM/R_p, which is the uniform model's 3ε_AM/R_p for a sphere.
+
+**Equations.** With θ = c_s/c_s,max and a constant solid diffusivity D_c (`D_c`):
+
+  c_s,max ∂θ/∂t = (1/rᵏ) ∂/∂r (rᵏ D_c c_s,max ∂θ/∂r),  ∂θ/∂r = 0 at r = 0,  −D_c c_s,max ∂θ/∂r = i_n/F at r = R_p (the outward flux; an anodic i_n removes lithium)
+
+i_n is the Butler–Volmer rate of §8, evaluated with the electrode node's u, Φ₁, Φ₂ and the crystal's **surface** θ (the Redlich–Kister OCP of §2, with its ln θ terms). The electrode rows carry the source a·i_n as in the uniform model; the electrode's own fourth unknown is held fixed.
+
+**Discretization.** Vertex-centred finite volumes: nodes at r_j = j·h, h = R_p/(nj_crystal − 1), each owning the volume ∫ rᵏ dr over [r_j − h/2, r_j + h/2] ∩ [0, R_p]. The flux through the face between nodes j and j+1 is −D_c c_s,max A_f (θ_{j+1} − θ_j)/h with A_f = r_fᵏ; the surface node receives the reaction flux R_pᵏ·i_n/F. Every node, the surface included, stores lithium: a surface that is filling or emptying can take up or give off lithium, as in the continuum (a zero-volume surface node could pass only what diffusion across half a cell carries, which fails at small D_c or in a constant-voltage hold). The unknown at every crystal node is the log-odds s = ln(θ/(1−θ)), so 0 < θ < 1 throughout (§8). Lithium is conserved exactly: the crystal rows telescope to d/dt ∑ c_s,max V_j θ_j = −R_pᵏ i_n/F.
+
+**Condensed Newton step.** The crystals couple only to their own electrode node, through the surface reaction. Every Newton iteration:
+1. assembles all crystals as one block-tridiagonal system with blocks of size 1 (J_cc) and solves it for the residual and for three right-hand sides, the surface row's derivatives with respect to the node's u, Φ₁ and Φ₂ (J_ce);
+2. eliminates the crystals: δc = −J_cc⁻¹(R_c + J_ce δe), whose surface entry adds a 3 × 3 term to each cathode node's diagonal block and a correction to its residual;
+3. solves the electrode system with BAND and back-substitutes for δc.
+
+This is the exact Newton step of the coupled system (quadratic convergence). The step limits of §8 apply to the crystal unknowns too. Divergence (an update above 10³) is judged on the damped electrode update λ·max|δe|: near θ = 0 or 1 a linearized log-odds update of the crystals is legitimately huge, and through the condensation it also inflates the undamped electrode update (for example at the start of a constant-voltage hold after a charge has drained the crystal surfaces to θ ≈ 10⁻⁸); the step limit scales both down.
+
+**Limits.** The exit reasons `particles_full` and `particles_empty` refer to the crystal surfaces.
+
+**Uniform limit.** For D_c → ∞ the crystal profiles flatten and the model becomes the uniform-particle model; the difference in cell voltage falls like 1/D_c (1.16 × 10⁻¹⁴ V·cm²/s over the first half hour of a 1C discharge, measured at D_c = 10⁻¹⁰, 10⁻⁹ and 10⁻⁸ cm²/s; tests/test_crystal.py).
+
+**Default diffusivity.** `D_c` = 5.162 × 10⁻¹² cm²/s is the value the original program carries for its inactive crystal scale (`diff_c`, C:L97). For a 200 nm crystal, R_p²/D_c ≈ 78 s, so the crystals matter at high rates and in short pulses; at 1C the capacity to 3.0 V is within 0.2 % of the uniform model's.

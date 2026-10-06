@@ -15,6 +15,8 @@ import numpy as np
 
 MODES = ("faithful", "corrected")
 DT_MODES = ("fixed", "adaptive")
+PARTICLE_MODELS = ("uniform", "crystal")   # the uniform-model family; the agglomerate model is AggParams
+CRYSTAL_SHAPES = {"slab": 0, "cylinder": 1, "sphere": 2}
 
 
 def check_dt_mode(p):
@@ -53,7 +55,11 @@ class Params:
     M: float = 96.46               # molar mass [g/mol]
     rho: float = 4.6               # density [g/cm3]
     Q_th: float = 0.150            # theoretical capacity [Ah/g]
-    R_p: float = 200.0e-7          # particle radius [cm]
+    R_p: float = 200.0e-7          # particle radius [cm] (crystal model: crystal radius, or a slab's half-thickness)
+    particle_model: str = "uniform"  # 'uniform' particles, or 'crystal' (solid diffusion; corrected mode; #4)
+    crystal_shape: str = "sphere"  # crystal model: 'sphere', 'cylinder' or 'slab'
+    D_c: float = 5.162e-12         # crystal model: solid diffusivity [cm2/s] (the original's diff_c, C:L97)
+    nj_crystal: int = 21           # crystal model: nodes across a crystal (center and surface included)
     k_rxn: float = 2.5e-6          # rate constant (generic, i0 ~ 0.1 mA/cm2 at theta = 0.5, 1 M)
     alpha_a: float = 0.5
     alpha_c: float = 0.5
@@ -93,6 +99,15 @@ class Params:
         if self.mode not in MODES:
             raise ValueError(f"mode must be 'faithful' or 'corrected', got {self.mode!r}")
         check_dt_mode(self)
+        if self.particle_model not in PARTICLE_MODELS:
+            raise ValueError(f"particle_model must be one of {PARTICLE_MODELS}, got {self.particle_model!r}")
+        if self.crystal_shape not in CRYSTAL_SHAPES:
+            raise ValueError(f"crystal_shape must be one of {tuple(CRYSTAL_SHAPES)}, got {self.crystal_shape!r}")
+        if self.particle_model == "crystal":
+            if self.mode != "corrected":
+                raise ValueError("particle_model='crystal' needs mode='corrected'")
+            if self.nj_crystal < 4:
+                raise ValueError(f"nj_crystal must be at least 4, got {self.nj_crystal}")
 
     @classmethod
     def faithful(cls, *, sigma: float, k_exp: Optional[float] = None, k_rxn: Optional[float] = None,
