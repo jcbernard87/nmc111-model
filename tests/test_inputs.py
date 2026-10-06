@@ -97,3 +97,19 @@ def test_programs_reject_bad_values(text, msg, fortran_exe, cpp_exe, tmp_path):
         from nmc_model.protocol import parse
         parse(p.steps, p)                           # the protocol is parsed when a run starts
     assert all(m in str(err.value) for m in msgs), str(err.value)
+
+
+def test_a_quoted_path_with_slashes_is_one_value(fortran_exe, cpp_exe, tmp_path):
+    """A '/' inside a quoted value (an output path with directories) does not end the namelist group: the C++
+    and Python readers ended the group there, so the output file name was lost."""
+    out = tmp_path / "sub" / "out.txt"
+    out.parent.mkdir()
+    nml = tmp_path / "in.nml"
+    nml.write_text(f"&numerics\n  mode = 'corrected'\n/\n&protocol\n  steps = 'cc C=1 t=60'\n/\n"
+                   f"&output\n  file = '{out}', write_interval = 30.0\n/\n")
+    for exe in (fortran_exe, cpp_exe):
+        out.unlink(missing_ok=True)
+        r = subprocess.run([str(exe), str(nml)], cwd=tmp_path, capture_output=True, text=True)
+        assert r.returncode == 0 and out.exists(), (exe, r.stdout + r.stderr)
+    p, _, file = load(nml)
+    assert file == str(out) and p.write_interval == 30.0

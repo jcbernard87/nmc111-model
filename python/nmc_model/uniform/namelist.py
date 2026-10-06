@@ -70,7 +70,7 @@ def parse(text: str) -> dict:
     """Parse namelist text into {group: {name: value}} with lower-case keys."""
     body = "\n".join(_strip_comment(l) for l in text.splitlines())
     out: dict = {}
-    for m in re.finditer(r"&(\w+)(.*?)/", body, flags=re.S):
+    for m in re.finditer(r"&(\w+)((?:'[^']*'|\"[^\"]*\"|[^/'\"])*)/", body):   # a '/' inside quotes is text
         group, content = m.group(1).lower(), m.group(2)
         entries = {}
         for part in re.finditer(r"(\w+)\s*=\s*('[^']*'|\"[^\"]*\"|[^,\s/]+)", content):

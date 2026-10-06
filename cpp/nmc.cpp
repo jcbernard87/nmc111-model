@@ -320,7 +320,7 @@ Params read_input(const std::string& path) {
         {"output", {"file", "write_interval"}},
         {"agglomerate", {"nja", "time_mod", "r_agg", "r_xtal", "eps_agg", "d_agg", "tortuosity_e", "mass_loading", "percent_active", "mol_vol", "c0_init", "tau_agg", "sigma_agg", "dt_s"}},
     };
-    const std::regex group(R"(&(\w+)([\s\S]*?)/)");
+    const std::regex group(R"(&(\w+)((?:'[^']*'|"[^"]*"|[^/'"])*)/)");   // a '/' inside quotes is text
     const std::regex entry(R"((\w+)\s*=\s*('[^']*'|"[^"]*"|[^,\s/]+))");
     std::set<std::string> seen_groups;
     for (std::sregex_iterator g(text.begin(), text.end(), group), end; g != end; ++g) {
