@@ -97,6 +97,8 @@ class AggParams:
     steps: str = ""                    # protocol (docs/protocol.md); empty: discharge at C_rate
     cycles: int = 1
     write_interval: float = 18.0       # [s]
+    restart_read: str = ""         # corrected mode: start from this restart file (#13); '' = the initial state
+    restart_write: str = ""        # corrected mode: write the final state to this restart file; '' = none
     mode: str = "faithful"
 
     @classmethod

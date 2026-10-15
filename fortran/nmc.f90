@@ -50,6 +50,9 @@ program nmc
     integer  :: cycles = 1
     real(dp) :: write_interval = 18.0_dp               ! [s], corrected mode
     character(len=256) :: file = 'Time_Voltage.txt'
+    character(len=512) :: restart_read = '', restart_write = ''   ! corrected mode: restart files (#13)
+    logical  :: restarted = .false.                ! the run continues from restart_read
+    real(dp) :: I_restart = 0.0_dp                 ! the restart's last current (a constant-voltage first step)
 
     namelist /model/ particle_model
     namelist /cell/ L_cath_um, L_sep, nj, sep_node, eps, eps_AM, eps_sep, tau_sep, bruggeman, nj_crystal
@@ -60,7 +63,7 @@ program nmc
     namelist /operation/ C_rate, phi1_init, phi2_init, cs_init, t_max, n_steps, V_min, V_max
     namelist /numerics/ fd_step, newton_tol, newton_max_iter, mode, dt_mode, rtol, atol, dt_min, dt_max
     namelist /protocol/ steps, cycles
-    namelist /output/ file, write_interval
+    namelist /output/ file, write_interval, restart_read, restart_write
 
     ! ---------------- derived quantities and mode switches ----------------
     logical  :: faithful
@@ -144,6 +147,10 @@ program nmc
     input_file = 'nmc.nml'
     if (command_argument_count() >= 1) call get_command_argument(1, input_file)
     call read_input(trim(input_file))
+    if (trim(mode) == 'faithful' .and. (len_trim(restart_read) > 0 .or. len_trim(restart_write) > 0)) then
+        write(error_unit,'(A)') 'restart files need mode=''corrected'''
+        error stop 2
+    end if
     ! mesh sizes: the separator and the cathode each need interior nodes, an agglomerate at least four
     if (sep_node < 3) then
         write(error_unit,'(A)') 'sep_node must be at least 3'
@@ -215,7 +222,9 @@ program nmc
         call run_faithful()
     else
         call parse_protocol()
+        if (len_trim(restart_read) > 0) call read_restart(trim(restart_read))
         call run_protocol()
+        if (len_trim(restart_write) > 0) call write_restart(trim(restart_write))
     end if
 
     close(ounit)
@@ -451,6 +460,7 @@ contains
         if (skind(1) == K_CC) I = sC(1)*i_1C
         i_app = I
         call write_row_c(.true., 1)
+        if (restarted .and. skind(1) == K_CV) I = I_restart   ! as after the run the restart came from
         last_write = time
         nsteps_done = 0
         reason = ''
@@ -2165,6 +2175,104 @@ contains
         end do
         c = c_old
     end subroutine lu_newton
+
+    ! =============================== restart files (#13; see restart.py in Python) ===============================
+    subroutine write_restart(path)
+        !! The state, time, capacity and last current, 17 significant digits (exact round trip).
+        character(len=*), intent(in) :: path
+        integer :: u, j, v, l, q
+        open(newunit=u, file=path, status='replace', action='write')
+        write(u,'(A)') '# nmc111-model restart 1'
+        write(u,'(A)') 'model '//trim(particle_model)
+        write(u,'(A,ES24.16E3)') 't ', time
+        write(u,'(A,ES24.16E3)') 'mAhg ', mAhg
+        write(u,'(A,ES24.16E3)') 'I ', i_app
+        write(u,'(A,I0,A,I0)') 'array c ', nj, ' ', NV
+        do j = 1, nj
+            do v = 1, NV
+                write(u,'(ES24.16E3)') c(v,j)
+            end do
+        end do
+        if (xtal) then
+            write(u,'(A,I0,A,I0)') 'array xc ', nlx, ' ', nj_crystal
+            do l = 1, nlx
+                do q = 1, nj_crystal
+                    write(u,'(ES24.16E3)') xc(q,l)
+                end do
+            end do
+        else if (aggc) then
+            write(u,'(A,I0,A,I0)') 'array xc ', nl, ' ', NV*na
+            do l = 1, nl
+                do q = 1, na
+                    do v = 1, NV
+                        write(u,'(ES24.16E3)') cag(v,q,l)
+                    end do
+                end do
+            end do
+        end if
+        close(u)
+    end subroutine write_restart
+
+    subroutine read_restart(path)
+        !! Start from a restart file: its state, time, capacity and current; the model and sizes must match.
+        character(len=*), intent(in) :: path
+        character(len=1024) :: line
+        character(len=64) :: word, aname, model_r
+        integer :: u, ios, nr, mr, j, v, l, q
+        logical :: got_c, got_xc
+        real(dp) :: val
+        open(newunit=u, file=path, status='old', action='read', iostat=ios)
+        if (ios /= 0) call restart_error('cannot read '//path)
+        read(u,'(A)', iostat=ios) line
+        if (ios /= 0 .or. trim(line) /= '# nmc111-model restart 1') &
+            call restart_error(path//': not a restart file of this model')
+        model_r = ''; got_c = .false.; got_xc = .not. (xtal .or. aggc)
+        do
+            read(u,'(A)', iostat=ios) line
+            if (ios /= 0) exit
+            if (len_trim(line) == 0) cycle
+            read(line,*) word
+            select case (trim(word))
+            case ('model')
+                read(line,*) word, model_r
+                if (trim(model_r) /= trim(particle_model)) call restart_error( &
+                    'restart file does not match the input: model '//trim(model_r)//', input '//trim(particle_model))
+            case ('t')
+                read(line,*) word, val; time = val
+            case ('mAhg')
+                read(line,*) word, val; mAhg = val
+            case ('I')
+                read(line,*) word, val; I_restart = val
+            case ('array')
+                read(line,*) word, aname, nr, mr
+                if (trim(aname) == 'c') then
+                    if (nr /= nj .or. mr /= NV) call restart_error('restart file does not match the input: array c')
+                    read(u,*) ((c(v,j), v = 1, NV), j = 1, nj)
+                    got_c = .true.
+                else if (trim(aname) == 'xc' .and. xtal) then
+                    if (nr /= nlx .or. mr /= nj_crystal) call restart_error('restart file does not match the input: array xc')
+                    read(u,*) ((xc(q,l), q = 1, nj_crystal), l = 1, nlx)
+                    got_xc = .true.
+                else if (trim(aname) == 'xc' .and. aggc) then
+                    if (nr /= nl .or. mr /= NV*na) call restart_error('restart file does not match the input: array xc')
+                    read(u,*) (((cag(v,q,l), v = 1, NV), q = 1, na), l = 1, nl)
+                    got_xc = .true.
+                else
+                    call restart_error('restart file does not match the input: array '//trim(aname))
+                end if
+            end select
+        end do
+        close(u)
+        if (len_trim(model_r) == 0 .or. .not. got_c .or. .not. got_xc) &
+            call restart_error('restart file does not match the input: missing entries')
+        restarted = .true.
+    end subroutine read_restart
+
+    subroutine restart_error(msg)
+        character(len=*), intent(in) :: msg
+        write(error_unit,'(A)') msg
+        error stop 2
+    end subroutine restart_error
 
     ! ------------------------------------------------------------------ crystal model
     pure real(dp) function ipow(x, n)

@@ -232,6 +232,25 @@ class UniformStepper:
     def newton_step(self, c, h, I):
         return self.model.newton_step(c, h, I, backend=self.backend)
 
+    # ---- restart files (nmc_model.restart) ----
+    def restart_arrays(self, c):
+        if hasattr(c, "xc"):
+            return [("c", c.x), ("xc", c.xc)]
+        if hasattr(c, "ca"):
+            return [("c", c.c), ("xc", c.ca.reshape(c.ca.shape[0], -1))]
+        return [("c", c)]
+
+    def restart_shapes(self):
+        return {name: a.shape for name, a in self.restart_arrays(self.model.initial_state())}
+
+    def from_restart(self, arrays):
+        st = self.model.initial_state()
+        if hasattr(st, "xc"):
+            return type(st)(arrays["c"].copy(), arrays["xc"].copy())
+        if hasattr(st, "ca"):
+            return type(st)(arrays["c"].copy(), arrays["xc"].reshape(st.ca.shape).copy())
+        return arrays["c"].copy()
+
     @staticmethod
     def flat(c):
         """The state as one vector, for the adaptive driver's error estimate."""
@@ -267,5 +286,20 @@ class UniformStepper:
         return driver_limit(float(self.model.conc(x).min()), self.p.c_bulk, float(th.min()), float(th.max()))
 
 
+def run_with_restarts(stepper, model: str, result, max_steps=None):
+    """run_protocol, from p.restart_read if set, writing p.restart_write if set (nmc_model.restart)."""
+    from .. import restart
+    p = stepper.p
+    start = None
+    if p.restart_read:
+        r = restart.read(p.restart_read, model, stepper.restart_shapes())
+        start = (stepper.from_restart(r["arrays"]), r["t"], r["mAhg"], r["I"])
+    res = run_protocol(stepper, max_steps=max_steps, result=result, start=start)
+    if p.restart_write:
+        t, mAhg, I = res.end
+        restart.write(p.restart_write, model, t, mAhg, I, stepper.restart_arrays(res.final_state))
+    return res
+
+
 def _run_protocol(p: Params, *, backend: str, pivot: str, max_steps: Optional[int]) -> Result:
-    return run_protocol(UniformStepper(p, backend=backend, pivot=pivot), max_steps=max_steps, result=Result())
+    return run_with_restarts(UniformStepper(p, backend=backend, pivot=pivot), p.particle_model, Result(), max_steps)

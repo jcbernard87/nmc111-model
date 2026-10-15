@@ -20,7 +20,10 @@ CRYSTAL_SHAPES = {"slab": 0, "cylinder": 1, "sphere": 2}
 
 
 def check_dt_mode(p):
-    """dt_mode is 'fixed' or 'adaptive', and adaptive only in corrected mode (both particle models)."""
+    """dt_mode is 'fixed' or 'adaptive', and adaptive only in corrected mode (both particle models); likewise
+    restart files."""
+    if (p.restart_read or p.restart_write) and p.mode != "corrected":
+        raise ValueError("restart files need mode='corrected'")
     if p.dt_mode not in DT_MODES:
         raise ValueError(f"dt_mode must be one of {DT_MODES}, got {p.dt_mode!r}")
     if p.dt_mode == "adaptive" and p.mode != "corrected":
@@ -93,6 +96,8 @@ class Params:
     steps: str = ""                # empty: classic discharge at C_rate
     cycles: int = 1
     write_interval: float = 18.0   # [s]
+    restart_read: str = ""         # corrected mode: start from this restart file (#13); '' = the initial state
+    restart_write: str = ""        # corrected mode: write the final state to this restart file; '' = none
     mode: str = "faithful"
 
     def __post_init__(self):

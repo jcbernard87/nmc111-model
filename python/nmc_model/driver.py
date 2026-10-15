@@ -69,6 +69,7 @@ class ProtocolResult:
     exit_reason: str = ""
     steps: int = 0
     final_state: Any = None
+    end: tuple = (0.0, 0.0, 0.0)          # (t [s], capacity [mAh/g], current [A]) at the end, for a restart
 
 
 def advance(stepper, state, dt: float, I: float, *, margin=None):
@@ -191,13 +192,15 @@ def cv_advance(stepper, state, h: float, V_set: float, I_guess: float):
             h = h / 2
 
 
-def run_protocol(stepper, *, max_steps: Optional[int] = None, result=None) -> ProtocolResult:
-    """Run the protocol p.steps (repeated p.cycles times)."""
+def run_protocol(stepper, *, max_steps: Optional[int] = None, result=None, start=None) -> ProtocolResult:
+    """Run the protocol p.steps (repeated p.cycles times). `start` = (state, t, mAhg, I) continues from a
+    restart: the protocol runs from its first step at that state, time and capacity, and a constant-voltage
+    first step starts from the current I, as it would after the run the restart came from."""
     p = stepper.p
     steps = expand(p)
-    state = stepper.initial_state()
+    state = stepper.initial_state() if start is None else start[0]
     dt = p.dt
-    t, mAhg, n_done = 0.0, 0.0, 0
+    t, mAhg, n_done = (0.0, 0.0, 0) if start is None else (start[1], start[2], 0)
     res = result if result is not None else ProtocolResult()
 
     def first_current(st: Step) -> float:
@@ -205,7 +208,7 @@ def run_protocol(stepper, *, max_steps: Optional[int] = None, result=None) -> Pr
 
     def finish(reason, k, I):
         res.rows.append(stepper.row(t, state, mAhg, I, k))
-        res.exit_reason, res.steps, res.final_state = reason, n_done, state
+        res.exit_reason, res.steps, res.final_state, res.end = reason, n_done, state, (t, mAhg, I)
         return res
 
     adaptive = getattr(p, "dt_mode", "fixed") == "adaptive"
@@ -215,6 +218,8 @@ def run_protocol(stepper, *, max_steps: Optional[int] = None, result=None) -> Pr
 
     I = first_current(steps[0])
     res.rows.append(stepper.row(t, state, mAhg, I, 1))
+    if start is not None and steps[0].kind == "cv":
+        I = start[3]
     last_write = t
     reason = ""
     for k, st in enumerate(steps, start=1):
@@ -224,7 +229,7 @@ def run_protocol(stepper, *, max_steps: Optional[int] = None, result=None) -> Pr
         h_next, prev = dt, None              # adaptive: the next step, and (state, step) before this one
         while True:
             if max_steps is not None and n_done >= max_steps:
-                res.exit_reason, res.steps, res.final_state = "max_steps", n_done, state
+                res.exit_reason, res.steps, res.final_state, res.end = "max_steps", n_done, state, (t, mAhg, I)
                 return res
             if adaptive:
                 h = min(h_next, h_max, last_write + p.write_interval - t)
@@ -287,5 +292,5 @@ def run_protocol(stepper, *, max_steps: Optional[int] = None, result=None) -> Pr
             if t >= 99.0 * 3600.0:
                 return finish("max_time", k, I)
     res.exit_reason = reason if len(steps) == 1 else "end_of_protocol"
-    res.steps, res.final_state = n_done, state
+    res.steps, res.final_state, res.end = n_done, state, (t, mAhg, I)
     return res

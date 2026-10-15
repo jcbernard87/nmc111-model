@@ -33,7 +33,7 @@ import numpy as np
 import bandsolver
 
 from .agglomerate import AggParams, _AK, _U_REF
-from .driver import SolverFailure, limit_reason, run_protocol
+from .driver import SolverFailure, limit_reason
 from .logcore import (DIVERGED, N, P1, P2, S, U, Electrode, LogKinetics, Transport, bounded, converged, equilibrate,
                       logit, physical_update, sigmoid)
 from .uniform import kinetics as ukin
@@ -286,6 +286,25 @@ class AggStepper:
     def newton_step(self, st, h, I):
         return self.model.newton_step(st, h, I, backend=self.backend)
 
+    # ---- restart files (nmc_model.restart) ----
+    def restart_arrays(self, c):
+        if hasattr(c, "xc"):
+            return [("c", c.x), ("xc", c.xc)]
+        if hasattr(c, "ca"):
+            return [("c", c.c), ("xc", c.ca.reshape(c.ca.shape[0], -1))]
+        return [("c", c)]
+
+    def restart_shapes(self):
+        return {name: a.shape for name, a in self.restart_arrays(self.model.initial_state())}
+
+    def from_restart(self, arrays):
+        st = self.model.initial_state()
+        if hasattr(st, "xc"):
+            return type(st)(arrays["c"].copy(), arrays["xc"].copy())
+        if hasattr(st, "ca"):
+            return type(st)(arrays["c"].copy(), arrays["xc"].reshape(st.ca.shape).copy())
+        return arrays["c"].copy()
+
     @staticmethod
     def flat(st):
         """The state as one vector, for the adaptive driver's error estimate."""
@@ -327,4 +346,5 @@ class AggResult(Result):
 
 
 def run_corrected(p: AggParams, *, max_steps: Optional[int] = None, backend: str = "cpp") -> AggResult:
-    return run_protocol(AggStepper(p, backend=backend), max_steps=max_steps, result=AggResult())
+    from .uniform.simulate import run_with_restarts
+    return run_with_restarts(AggStepper(p, backend=backend), "agglomerate", AggResult(), max_steps)

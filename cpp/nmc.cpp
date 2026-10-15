@@ -262,6 +262,7 @@ struct Params {
     int cycles = 1;
     double write_interval = 18.0;          // [s], corrected mode
     std::string file = "Time_Voltage.txt";
+    std::string restart_read, restart_write;  // corrected mode: restart files (#13)
 };
 
 std::string lower(std::string s) {
@@ -306,6 +307,7 @@ Params read_input(const std::string& path) {
                                         {"nj_crystal", &p.nj_crystal}};
     std::map<std::string, std::string*> strs = {{"mode", &p.mode}, {"file", &p.file}, {"steps", &p.steps},
                                                 {"particle_model", &p.particle_model}, {"dt_mode", &p.dt_mode},
+                                                {"restart_read", &p.restart_read}, {"restart_write", &p.restart_write},
                                                 {"crystal_shape", &p.crystal_shape}};
     // the groups and their names, as the Fortran program's namelists declare them
     const std::map<std::string, std::set<std::string>> groups = {
@@ -317,7 +319,7 @@ Params read_input(const std::string& path) {
         {"operation", {"c_rate", "phi1_init", "phi2_init", "cs_init", "t_max", "n_steps", "v_min", "v_max"}},
         {"numerics", {"fd_step", "newton_tol", "newton_max_iter", "mode", "dt_mode", "rtol", "atol", "dt_min", "dt_max"}},
         {"protocol", {"steps", "cycles"}},
-        {"output", {"file", "write_interval"}},
+        {"output", {"file", "write_interval", "restart_read", "restart_write"}},
         {"agglomerate", {"nja", "time_mod", "r_agg", "r_xtal", "eps_agg", "d_agg", "tortuosity_e", "mass_loading", "percent_active", "mol_vol", "c0_init", "tau_agg", "sigma_agg", "dt_s"}},
     };
     const std::regex group(R"(&(\w+)((?:'[^']*'|"[^"]*"|[^/'"])*)/)");   // a '/' inside quotes is text
@@ -1496,6 +1498,61 @@ struct AggCorrected {
     }
 };
 
+// ============================== restart files (#13; see restart.py in Python) ==============================
+// the state, time, capacity and last current, 17 significant digits (an exact round trip)
+void write_restart(const std::string& path, const std::string& model, double t, double mAhg, double I,
+                   const std::vector<double>& c, int nj, const std::vector<double>& xc, int nl) {
+    std::FILE* f = std::fopen(path.c_str(), "w");
+    if (!f) throw std::runtime_error("cannot write " + path);
+    std::fprintf(f, "# nmc111-model restart 1\nmodel %s\nt %.16e\nmAhg %.16e\nI %.16e\n", model.c_str(), t, mAhg, I);
+    std::fprintf(f, "array c %d %d\n", nj, NV);
+    for (double v : c) std::fprintf(f, "%.16e\n", v);
+    if (!xc.empty()) {
+        std::fprintf(f, "array xc %d %d\n", nl, static_cast<int>(xc.size()) / nl);
+        for (double v : xc) std::fprintf(f, "%.16e\n", v);
+    }
+    std::fclose(f);
+}
+
+// start from a restart file: its state (into c, xc), time, capacity and current; the model and sizes must match
+void read_restart(const std::string& path, const std::string& model, std::vector<double>& c, int nj,
+                  std::vector<double>& xc, int nl, double& t, double& mAhg, double& I) {
+    std::ifstream in(path);
+    if (!in) throw std::runtime_error("cannot read " + path);
+    std::string line;
+    if (!std::getline(in, line) || line != "# nmc111-model restart 1")
+        throw std::runtime_error(path + ": not a restart file of this model");
+    bool got_model = false, got_c = false, got_xc = xc.empty();
+    while (std::getline(in, line)) {
+        std::istringstream ls(line);
+        std::string word;
+        if (!(ls >> word)) continue;
+        if (word == "model") {
+            std::string mdl;
+            ls >> mdl;
+            if (mdl != model) throw std::runtime_error("restart file does not match the input: model " + mdl + ", input " + model);
+            got_model = true;
+        } else if (word == "t") { ls >> t; }
+        else if (word == "mAhg") { ls >> mAhg; }
+        else if (word == "I") { ls >> I; }
+        else if (word == "array") {
+            std::string name;
+            int n, k;
+            ls >> name >> n >> k;
+            std::vector<double>* a = name == "c" ? &c : (name == "xc" ? &xc : nullptr);
+            const bool ok = a && ((name == "c" && n == nj && k == NV) ||
+                                  (name == "xc" && n == nl && static_cast<std::size_t>(n) * k == xc.size()));
+            if (!ok) throw std::runtime_error("restart file does not match the input: array " + name);
+            for (double& v : *a) {
+                if (!std::getline(in, line)) throw std::runtime_error(path + ": truncated");
+                v = std::strtod(line.c_str(), nullptr);
+            }
+            (name == "c" ? got_c : got_xc) = true;
+        }
+    }
+    if (!got_model || !got_c || !got_xc) throw std::runtime_error("restart file does not match the input: missing entries");
+}
+
 int main(int argc, char** argv) {
     try {
         Params input = read_input(argc > 1 ? argv[1] : "nmc.nml");
@@ -1503,6 +1560,8 @@ int main(int argc, char** argv) {
         if (input.sep_node < 3) throw std::runtime_error("sep_node must be at least 3");
         if (input.nj - input.sep_node < 3) throw std::runtime_error("nj - sep_node must be at least 3");
         if (input.particle_model == "agglomerate" && input.nja < 4) throw std::runtime_error("nja must be at least 4");
+        if (input.mode == "faithful" && (!input.restart_read.empty() || !input.restart_write.empty()))
+            throw std::runtime_error("restart files need mode='corrected'");
         if (input.particle_model == "agglomerate" && input.mode == "faithful") return Agglomerate(input).run();
         if (input.particle_model != "uniform" && input.particle_model != "crystal" && input.particle_model != "agglomerate")
             throw std::runtime_error("particle_model must be 'uniform', 'crystal' or 'agglomerate'");
@@ -1984,9 +2043,15 @@ int main(int argc, char** argv) {
                 return h / (h + hp) * std::sqrt(s / static_cast<double>(c.size() + ca.size()));
             };
 
+            // restart files: the crystal (nlx x nj_crystal) or agglomerate (nl x nja*NV) state is ca, row by row
+            const int ca_rows = xtal ? nlx : (aggc ? agg->nl : 0);
+            double I_restart = 0.0;
+            if (!p.restart_read.empty())
+                read_restart(p.restart_read, p.particle_model, c, nj, ca, ca_rows, t, mAhg, I_restart);
             double I = steps[0].kind == Kind::cc ? steps[0].C * m.i_1C : 0.0;
             m.i_app = I;
             write_row(true, 1);
+            if (!p.restart_read.empty() && steps[0].kind == Kind::cv) I = I_restart;  // as after the run it came from
             double last_write = t;
             std::string reason;
             int n_done = 0;
@@ -2076,6 +2141,8 @@ int main(int argc, char** argv) {
             }
             if (finished) exit_reason = steps.size() == 1 ? reason : "end_of_protocol";
             nsolve = n_done;
+            if (!p.restart_write.empty())
+                write_restart(p.restart_write, p.particle_model, t, mAhg, m.i_app, c, nj, ca, ca_rows);
         }
         std::fclose(out);
         std::printf("%s run, C-rate %.17g: exit %s after %d steps; wrote %s\n", p.mode.c_str(), p.C_rate,

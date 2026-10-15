@@ -84,6 +84,7 @@ The defaults of `AggParams` and of the `&agglomerate` input. Values not listed a
 | `dt_mode` | `'fixed'` | `'adaptive'` chooses the time step from the local error estimate (docs/protocol.md; #8). Both models, corrected mode |
 | `rtol`, `atol` | 10⁻⁴, 10⁻⁴ | adaptive: local error tolerances on the state (ln c, potentials in V, log-odds of θ) |
 | `dt_min`, `dt_max` | 10⁻⁶ s, 0 | adaptive: step bounds; `dt_max = 0` means `write_interval` |
+| `restart_read`, `restart_write` | `''` | `&output`: start from, or write the final state to, a restart file (docs/protocol.md; #13). Both models, corrected mode |
 
 
 ## Crystal model: inputs (corrected mode, `particle_model = 'crystal'`)

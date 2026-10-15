@@ -36,4 +36,5 @@
 /
 &output
   file = 'Time_Voltage.txt', write_interval = 18.0
+  restart_read = '', restart_write = ''   ! restart files: start from / write the final state (docs/protocol.md)
 /

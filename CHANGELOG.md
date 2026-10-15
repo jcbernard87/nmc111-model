@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Restart files** (corrected mode, both models, all three languages; #13): `restart_write` writes the final state, time, capacity and current; `restart_read` starts a run from it. A continued run repeats the run it continues exactly (byte for byte in Fortran and C++); the implementations read each other's files.
+- **CI** (#17): every supported Python version (3.9-3.13), coverage in the run summary.
+
 ## 0.3.0 (2026-10-14)
 
 - **Fix:** a '/' inside a quoted value (an output path with directories) ended the namelist group in the C++ and Python readers, so the C++ program stopped with "cannot write" and Python lost the value. Both now treat quoted text as text, as the Fortran program does.
