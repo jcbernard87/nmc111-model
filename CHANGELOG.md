@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-10-14)
 
 - **Fix:** a '/' inside a quoted value (an output path with directories) ended the namelist group in the C++ and Python readers, so the C++ program stopped with "cannot write" and Python lost the value. Both now treat quoted text as text, as the Fortran program does.
 - **Crystal model** (`particle_model = 'crystal'`, corrected mode, all three languages; #4): the uniform model with solid-state diffusion in each cathode volume's crystal (sphere, cylinder or slab), ported from lfp-model: Fick's law in the log-odds, vertex-centred finite volumes in r, the crystals condensed into the electrode's Newton step. Default `D_c` = 5.162 × 10⁻¹² cm²/s, the original program's value. Four more output columns (surface and mean θ of the crystals next to the separator and the collector); `input/crystal.nml`. Fortran and C++ byte-identical, Python to the printed precision; validated as in lfp-model (exact constant-flux solution, second order in r and x, first order in t, conservation, the full Jacobian, the uniform limit).
