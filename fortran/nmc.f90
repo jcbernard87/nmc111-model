@@ -51,6 +51,15 @@ program nmc
     real(dp) :: write_interval = 18.0_dp               ! [s], corrected mode
     character(len=256) :: file = 'Time_Voltage.txt'
     character(len=512) :: restart_read = '', restart_write = ''   ! corrected mode: restart files (#13)
+    character(len=1024) :: columns = ''                ! corrected mode: time-series columns ('' = all; #12)
+    character(len=512) :: profile_file = ''            ! corrected mode: profiles against x ('' = none)
+    character(len=1024) :: profile_vars = '', profile_times = ''   ! their variables ('' = all) and times [s]
+    integer  :: profile_every = 0                      ! a profile with every N-th output row (0: none)
+    ! configurable output: the model's columns, the chosen ones, profile variables and schedule, node positions [cm]
+    character(len=16) :: col_names(13) = '', col_units(13) = ''
+    logical  :: use_columns = .false., col_keep(13) = .false., pv_on(5) = .false.
+    integer  :: pfu = 0, n_rows = 0, last_prof = -1, npt = 0, ipt = 1
+    real(dp), allocatable :: ptimes(:), xpos(:)
     logical  :: restarted = .false.                ! the run continues from restart_read
     real(dp) :: I_restart = 0.0_dp                 ! the restart's last current (a constant-voltage first step)
 
@@ -63,7 +72,8 @@ program nmc
     namelist /operation/ C_rate, phi1_init, phi2_init, cs_init, t_max, n_steps, V_min, V_max
     namelist /numerics/ fd_step, newton_tol, newton_max_iter, mode, dt_mode, rtol, atol, dt_min, dt_max
     namelist /protocol/ steps, cycles
-    namelist /output/ file, write_interval, restart_read, restart_write
+    namelist /output/ file, write_interval, restart_read, restart_write, columns, profile_file, profile_vars, &
+        profile_every, profile_times
 
     ! ---------------- derived quantities and mode switches ----------------
     logical  :: faithful
@@ -151,6 +161,14 @@ program nmc
         write(error_unit,'(A)') 'restart files need mode=''corrected'''
         error stop 2
     end if
+    if (trim(mode) == 'faithful' .and. (len_trim(columns) > 0 .or. len_trim(profile_file) > 0)) then
+        write(error_unit,'(A)') 'columns and profiles need mode=''corrected'''
+        error stop 2
+    end if
+    if (profile_every < 0) then
+        write(error_unit,'(A,I0)') 'profile_every must be at least 0, got ', profile_every
+        error stop 2
+    end if
     ! mesh sizes: the separator and the cathode each need interior nodes, an agglomerate at least four
     if (sep_node < 3) then
         write(error_unit,'(A)') 'sep_node must be at least 3'
@@ -223,7 +241,9 @@ program nmc
     else
         call parse_protocol()
         if (len_trim(restart_read) > 0) call read_restart(trim(restart_read))
+        call output_setup()
         call run_protocol()
+        call output_finish()
         if (len_trim(restart_write) > 0) call write_restart(trim(restart_write))
     end if
 
@@ -914,6 +934,16 @@ contains
         allocate(dx(nj), aW(nj), aE(nj), bW(nj), bE(nj))
         h_sep = L_sep/real(sep_node - 2, dp)
         h_cat = L_cath/real(nj - sep_node - 1, dp)
+        if (.not. allocated(xpos)) allocate(xpos(nj))  ! node positions [cm] (make_mesh in Python)
+        xpos = 0.0_dp
+        do j = 2, sep_node - 1
+            xpos(j) = h_sep*real(j - 1, dp) - h_sep/2.0_dp
+        end do
+        xpos(sep_node) = L_sep
+        do j = sep_node + 1, nj - 1
+            xpos(j) = L_sep + h_cat*real(j - sep_node, dp) - h_cat/2.0_dp
+        end do
+        xpos(nj) = L_cath + L_sep
         dx = 0.0_dp
         dx(2:s-1) = h_sep
         dx(s+1:nj-1) = h_cat
@@ -1399,8 +1429,23 @@ contains
         !! model also the surface and volume-mean theta of the crystals next to the separator and the collector.
         logical, intent(in) :: header
         integer, intent(in) :: step
-        real(dp) :: i0_li, eta, th(4)
+        real(dp) :: i0_li, eta, th(4), vals(13)
         character(len=1) :: st
+        if (use_columns) then
+            st = 'R'
+            if (i_app > 0) st = 'D'
+            if (i_app < 0) st = 'C'
+            i0_li = F*k_Li*(c_foil()**0.5_dp)*(c_Li_ref**0.5_dp)
+            eta = li_eta()
+            vals = 0.0_dp
+            vals(1:9) = [time/3600.0_dp, cell_voltage(), mAhg*M*3.6_dp/F, eta*1.0e3_dp, i0_li*1.0e3_dp, c_foil(), &
+                         i_app*1.0e3_dp, real(step, dp), li_nernst()*1.0e3_dp]
+            if (xtal) vals(10:13) = crystal_thetas()
+            if (aggc) vals(10:11) = [csmax_a*sigm(cag(ICS,na,1))/mol_vol, c_bulk*exp(c(IC,nj))]
+            call write_columns(header, vals, st, step)
+            call profile_hook()
+            return
+        end if
         if (header .and. xtal) then
             write(ounit,'(A5,1X,2(A12,1X),20(A15,1X))') 'State', 'Time', 'Voltage', 'Equivalence', 'Anode_Eta', &
                 'anode_exchange_c', 'Edge_c0', 'Current', 'Step', 'Li_Nernst', 'Th_surf_sep', 'Th_mean_sep', &
@@ -1435,6 +1480,7 @@ contains
             write(ounit,'(A5,1X,2(F12.5,1X),5(ES15.5,1X),I15,1X,ES15.5)') st, time/3600.0_dp, cell_voltage(), &
                 mAhg*M*3.6_dp/F, eta*1.0e3_dp, i0_li*1.0e3_dp, c_foil(), i_app*1.0e3_dp, step, li_nernst()*1.0e3_dp
         end if
+        call profile_hook()
     end subroutine write_row_c
 
     subroutine write_row(header)
@@ -2175,6 +2221,243 @@ contains
         end do
         c = c_old
     end subroutine lu_newton
+
+    ! =============================== configurable output (#12; see output.py in Python) ===============================
+    subroutine split_words(text, words, n)
+        !! The comma- or blank-separated words of text.
+        character(len=*), intent(in) :: text
+        character(len=64), intent(out) :: words(:)
+        integer, intent(out) :: n
+        character(len=len(text)) :: t
+        integer :: i, j
+        t = text
+        do i = 1, len(t)
+            if (t(i:i) == ',') t(i:i) = ' '
+        end do
+        n = 0
+        i = 1
+        do while (i <= len_trim(t))
+            if (t(i:i) == ' ') then
+                i = i + 1
+                cycle
+            end if
+            j = i
+            do while (j <= len_trim(t))
+                if (t(j:j) == ' ') exit
+                j = j + 1
+            end do
+            n = n + 1
+            if (n > size(words)) call output_error('too many names in a list: '//trim(text))
+            words(n) = t(i:j-1)
+            i = j
+        end do
+    end subroutine split_words
+
+    subroutine output_setup()
+        !! Parse columns, profile_vars and profile_times; open the profile file; node positions.
+        character(len=64) :: words(64)
+        character(len=16), parameter :: pv_names(5) = [character(len=16) :: 'c', 'phi1', 'phi2', 'theta', 'theta_surf']
+        integer :: n, i, k, npv_avail, ncol_avail
+        real(dp) :: ts
+        logical :: found
+        col_names(1:9) = [character(len=16) :: 'Time', 'Voltage', 'Equivalence', 'Anode_Eta', 'anode_exchange_c', &
+            'Edge_c0', 'Current', 'Step', 'Li_Nernst']
+        col_units(1:9) = [character(len=16) :: 'hours', 'Volts', 'electron_equivs', 'mV', 'mA/cm2', 'mol/cm3', &
+            'mA/cm2', '#', 'mV']
+        ncol_avail = 9
+        if (xtal) then
+            col_names(10:13) = [character(len=16) :: 'Th_surf_sep', 'Th_mean_sep', 'Th_surf_col', 'Th_mean_col']
+            col_units(10:13) = [character(len=16) :: '-', '-', '-', '-']
+            ncol_avail = 13
+        else if (aggc) then
+            col_names(10:11) = [character(len=16) :: 'x_front', 'c_collector']
+            col_units(10:11) = [character(len=16) :: 'LixNMC', 'mol/cm3']
+            ncol_avail = 11
+        end if
+        use_columns = len_trim(columns) > 0
+        col_keep = .false.
+        col_keep(1) = .true.                            ! the time always (the state too)
+        if (use_columns) then
+            call split_words(columns, words, n)
+            do i = 1, n
+                found = .false.
+                do k = 1, ncol_avail
+                    if (lower(trim(words(i))) == lower(trim(col_names(k)))) then
+                        col_keep(k) = .true.; found = .true.
+                    end if
+                end do
+                if (.not. found) call output_error('unknown output column '''//trim(words(i))//'''')
+            end do
+        end if
+        col_keep(ncol_avail+1:) = .false.
+        n_rows = 0; last_prof = -1; npt = 0; ipt = 1
+        if (len_trim(profile_file) == 0) return
+        npv_avail = 4
+        if (xtal .or. aggc) npv_avail = 5
+        pv_on = .false.
+        if (len_trim(profile_vars) == 0) then
+            pv_on(1:npv_avail) = .true.
+        else
+            call split_words(profile_vars, words, n)
+            do i = 1, n
+                found = .false.
+                do k = 1, npv_avail
+                    if (lower(trim(words(i))) == trim(pv_names(k))) then
+                        pv_on(k) = .true.; found = .true.
+                    end if
+                end do
+                if (.not. found) call output_error('unknown profile variable '''//trim(words(i))//'''')
+            end do
+        end if
+        call split_words(profile_times, words, n)
+        allocate(ptimes(max(n, 1)))
+        do i = 1, n
+            read(words(i), *) ptimes(i)
+        end do
+        npt = n
+        do i = 2, npt                                  ! sorted
+            ts = ptimes(i); k = i - 1
+            do while (k >= 1)
+                if (ptimes(k) <= ts) exit
+                ptimes(k+1) = ptimes(k); k = k - 1
+            end do
+            ptimes(k+1) = ts
+        end do
+        open(newunit=pfu, file=trim(profile_file), status='replace', action='write')
+        write(pfu,'(A15,1X,A15)', advance='no') 'Time', 'x'
+        do k = 1, 5
+            if (pv_on(k)) write(pfu,'(1X,A15)', advance='no') trim(pv_names(k))
+        end do
+        write(pfu,'(A)') ''
+        write(pfu,'(A15,1X,A15)', advance='no') 'hours', 'um'
+        do k = 1, 5
+            if (.not. pv_on(k)) cycle
+            select case (k)
+            case (1); write(pfu,'(1X,A15)', advance='no') 'mol/cm3'
+            case (2, 3); write(pfu,'(1X,A15)', advance='no') 'V'
+            case default; write(pfu,'(1X,A15)', advance='no') '-'
+            end select
+        end do
+        write(pfu,'(A)') ''
+    end subroutine output_setup
+
+    subroutine profile_hook()
+        !! After an output row: a profile with every profile_every-th row and at the first row at or after each of
+        !! profile_times (the last row's is written after the run, if not already).
+        logical :: due
+        integer :: i
+        if (len_trim(profile_file) == 0) return
+        i = n_rows
+        n_rows = n_rows + 1
+        due = profile_every > 0
+        if (due) due = mod(i, profile_every) == 0
+        do while (ipt <= npt)
+            if (time < ptimes(ipt)*(1.0_dp - 1.0e-12_dp)) exit
+            ipt = ipt + 1
+            due = .true.
+        end do
+        if (due) then
+            call write_profile()
+            last_prof = i
+        end if
+    end subroutine profile_hook
+
+    subroutine write_profile()
+        !! One profile: a row per node with the time [h], x [um] and the chosen variables (NaN where absent).
+        real(dp) :: v(5), shift, nan, vtot, ms
+        integer :: j, k, l, q
+        nan = ieee_value(1.0_dp, ieee_quiet_nan)
+        shift = c(IP1,nj) - cell_voltage()             ! the foil reference
+        do j = 1, nj
+            v = nan
+            v(1) = c_bulk*exp(c(IC,j))
+            if (j >= s) v(2) = c(IP1,j) - shift
+            v(3) = c(IP2,j) - shift
+            if (xtal .or. aggc) then
+                l = j - s
+                if ((xtal .and. l >= 1 .and. l <= nlx) .or. (aggc .and. l >= 1 .and. l <= nl)) then
+                    vtot = 0.0_dp; ms = 0.0_dp
+                    if (xtal) then
+                        do q = 1, nj_crystal
+                            vtot = vtot + xtal_V(q)
+                            ms = ms + xtal_V(q)*sigm(xc(q,l))
+                        end do
+                        v(5) = sigm(xc(nj_crystal,l))
+                    else
+                        do q = 1, na
+                            vtot = vtot + dV(q)
+                            ms = ms + dV(q)*sigm(cag(ICS,q,l))
+                        end do
+                        v(5) = sigm(cag(ICS,na,l))
+                    end if
+                    v(4) = ms/vtot
+                end if
+            else if (j >= s) then
+                v(4) = sigm(c(ICS,j))
+            end if
+            write(pfu,'(ES15.7,1X,ES15.7)', advance='no') time/3600.0_dp, xpos(j)*1.0e4_dp
+            do k = 1, 5
+                if (pv_on(k)) write(pfu,'(1X,ES15.7)', advance='no') v(k)
+            end do
+            write(pfu,'(A)') ''
+        end do
+    end subroutine write_profile
+
+    subroutine output_finish()
+        !! The last row's profile, if not already written; close the profile file.
+        if (len_trim(profile_file) == 0) return
+        if (last_prof /= n_rows - 1) call write_profile()
+        close(pfu)
+    end subroutine output_finish
+
+    subroutine write_columns(header, vals, st, step)
+        !! The time series with the chosen columns: the state A5, Time and Voltage F12.5, Step I15, others ES15.5.
+        logical, intent(in) :: header
+        real(dp), intent(in) :: vals(13)
+        character(len=1), intent(in) :: st
+        integer, intent(in) :: step
+        integer :: k
+        if (header) then
+            write(ounit,'(A5)', advance='no') 'State'
+            do k = 1, 13
+                if (.not. col_keep(k)) cycle
+                if (k <= 2) then
+                    write(ounit,'(1X,A12)', advance='no') trim(col_names(k))
+                else
+                    write(ounit,'(1X,A15)', advance='no') trim(col_names(k))
+                end if
+            end do
+            write(ounit,'(A)') ''
+            write(ounit,'(A5)', advance='no') 'CDR'
+            do k = 1, 13
+                if (.not. col_keep(k)) cycle
+                if (k <= 2) then
+                    write(ounit,'(1X,A12)', advance='no') trim(col_units(k))
+                else
+                    write(ounit,'(1X,A15)', advance='no') trim(col_units(k))
+                end if
+            end do
+            write(ounit,'(A)') ''
+        end if
+        write(ounit,'(A5)', advance='no') st
+        do k = 1, 13
+            if (.not. col_keep(k)) cycle
+            if (k <= 2) then
+                write(ounit,'(1X,F12.5)', advance='no') vals(k)
+            else if (k == 8) then
+                write(ounit,'(1X,I15)', advance='no') step
+            else
+                write(ounit,'(1X,ES15.5)', advance='no') vals(k)
+            end if
+        end do
+        write(ounit,'(A)') ''
+    end subroutine write_columns
+
+    subroutine output_error(msg)
+        character(len=*), intent(in) :: msg
+        write(error_unit,'(A)') msg
+        error stop 2
+    end subroutine output_error
 
     ! =============================== restart files (#13; see restart.py in Python) ===============================
     subroutine write_restart(path)

@@ -279,6 +279,23 @@ class AggStepper:
         self.p = p
         self.model = CorrectedModel(p)
         self.backend = backend
+        from .output import ProfileRecorder
+        self.recorder = ProfileRecorder(p, ["c", "phi1", "phi2", "theta", "theta_surf"], self.profile)
+
+    def profile(self, st, I):
+        """x [um] and the profile variables at every electrode node (nmc_model.output)."""
+        m = self.model
+        ce, _ = m.conc(st)
+        u_li, eta_li = m.foil(st, I)
+        shift = u_li + eta_li
+        s, nj = m.mesh.s, len(ce)
+        phi1 = st.c[:, P1] - shift
+        phi1[:s] = np.nan
+        th = m.cs(st) / m.cs_max
+        mean, surf = np.full(nj, np.nan), np.full(nj, np.nan)
+        mean[m.nodes], surf[m.nodes] = th @ (m.dV / m.dV.sum()), th[:, -1]
+        return m.mesh.x * 1.0e4, {"c": ce, "phi1": phi1, "phi2": st.c[:, P2] - shift, "theta": mean,
+                                  "theta_surf": surf}
 
     def initial_state(self):
         return self.model.initial_state()
@@ -314,6 +331,7 @@ class AggStepper:
         return self.model.voltage(st, I)
 
     def row(self, t, st, mAhg, I, k):
+        self.recorder.row(t, st, I)
         m, p = self.model, self.p
         state = "D" if I > 0 else ("C" if I < 0 else "R")
         ce, _ = m.conc(st)
@@ -335,7 +353,14 @@ class AggStepper:
 
 
 class AggResult(Result):
+    def header_units(self, n):
+        return (HEADER + HEADER_EXTRA)[:n], (UNITS + UNITS_EXTRA)[:n]
+
     def write(self, path) -> None:
+        if self.columns:
+            with open(path, "w") as fh:
+                self.write_columns(fh)
+            return
         def row(cols):
             return (f"{cols[0][:5]:>5} " + " ".join(f"{c[:12]:>12}" for c in cols[1:3]) + " "
                     + " ".join(f"{c[:15]:>15}" for c in cols[3:]))

@@ -58,6 +58,21 @@ class Result:
     exit_reason: str = ""
     steps: int = 0
     final_state: Optional[np.ndarray] = None
+    columns: str = ""                             # the time-series columns to write ('' = all; nmc_model.output)
+    profiles: list = field(default_factory=list)  # [(t [s], x [um], {variable: values})] (nmc_model.output)
+    profile_vars: tuple = ()
+
+    def header_units(self, n):
+        h, u = HEADER + HEADER_EXTRA + HEADER_CRYSTAL, UNITS + UNITS_EXTRA + UNITS_CRYSTAL
+        return h[:n], u[:n]
+
+    def write_columns(self, fh) -> None:
+        from .. import output
+        n = len(self.rows[0]) if self.rows else 0
+        header, units = self.header_units(n)
+        chosen = output.choose(header[1:], self.columns, "output column")
+        keep = [0, 1] + [header.index(c) for c in chosen if c != "Time"]   # the state and time always
+        output.write_table(fh, header, units, self.rows, keep)
 
     @property
     def array(self) -> np.ndarray:
@@ -66,6 +81,9 @@ class Result:
 
     def write(self, path) -> None:
         with open(path, "w") as fh:
+            if self.columns:
+                self.write_columns(fh)
+                return
             n = len(self.rows[0]) if self.rows else 0
             fh.write(format_header(extended=n > 7, crystal=n > 10))
             for r in self.rows:
@@ -225,6 +243,30 @@ class UniformStepper:
             from .logmodel import LogUniformModel
             self.model = LogUniformModel(p)
         self.p, self.backend = p, backend
+        from ..output import ProfileRecorder
+        names = ["c", "phi1", "phi2", "theta"] + (["theta_surf"] if p.particle_model == "crystal" else [])
+        self.recorder = ProfileRecorder(p, names, self.profile)
+
+    def profile(self, c, I):
+        """x [um] and the profile variables at every electrode node (nmc_model.output)."""
+        m, p = self.model, self.p
+        el = self.electrode(c)
+        s = m.mesh.s
+        shift = foil_shift(p, el, I)
+        nan = np.full(p.nj, np.nan)
+        phi1 = el[:, P1] - shift
+        phi1[:s] = np.nan
+        vals = {"c": p.c_bulk * np.exp(el[:, 0]), "phi1": phi1, "phi2": el[:, P2] - shift}
+        if hasattr(c, "xc"):
+            th = m.cs(c) / m.cs_max
+            mean, surf = nan.copy(), nan.copy()
+            mean[m.nodes], surf[m.nodes] = th @ (m.cm.V / m.cm.V.sum()), th[:, -1]
+            vals["theta"], vals["theta_surf"] = mean, surf
+        else:
+            th = 1.0 / (1.0 + np.exp(-el[:, 3]))
+            th[:s] = np.nan
+            vals["theta"] = th
+        return m.mesh.x * 1.0e4, vals
 
     def initial_state(self):
         return self.model.initial_state()
@@ -264,6 +306,7 @@ class UniformStepper:
         return cell_voltage(self.p, self.electrode(c), I)
 
     def row(self, t, c, mAhg, I, k):
+        self.recorder.row(t, c, I)
         r = _row(self.p, t, self.electrode(c), mAhg, I, k)
         if hasattr(c, "xc"):                     # crystal model: theta at the first and last crystal
             m = self.model
@@ -295,6 +338,8 @@ def run_with_restarts(stepper, model: str, result, max_steps=None):
         r = restart.read(p.restart_read, model, stepper.restart_shapes())
         start = (stepper.from_restart(r["arrays"]), r["t"], r["mAhg"], r["I"])
     res = run_protocol(stepper, max_steps=max_steps, result=result, start=start)
+    res.columns = p.columns
+    stepper.recorder.finish(res, p.profile_file)
     if p.restart_write:
         t, mAhg, I = res.end
         restart.write(p.restart_write, model, t, mAhg, I, stepper.restart_arrays(res.final_state))

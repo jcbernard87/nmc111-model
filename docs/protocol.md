@@ -60,6 +60,14 @@ Rows are written every `write_interval` seconds (default 18 s) and at the start 
 
 The run's exit reason is `end_of_protocol` when every step completed, or `nan` or `max_time` (99 h) otherwise. When a time step cannot be solved, the reason names the physical limit the cell has reached: `electrolyte_depleted` (the electrolyte in the electrode or in the agglomerate pores has fallen below 10⁻³ of c_bulk somewhere), `particles_full` or `particles_empty` (some particles or crystals within 10⁻³ of full or empty); `solver_fail` if none applies. The last row then reports the last converged sub-step, where the limit was reached. A single-step protocol reports how that step ended (`cutoff_low`, `cutoff_high`, `duration` or `current_limit`).
 
+## Choosing the output
+
+Both are corrected mode, in `&output`, both models, and off by default (the output is then as above).
+
+- **Columns** (`columns`): the time-series columns to write, by name, comma- or blank-separated, case-insensitive (e.g. `columns = 'Voltage, Current'`). The state and the time are always written; the others keep their order and formats. Each model offers its own columns (the crystal model's `Th_*`, the agglomerate model's `x_front` and `c_collector`); an unknown name stops the run.
+- **Profiles** (`profile_file`): the state against position, in one long table: two header rows (names, units), then one row per node per profile time with `Time` [h], `x` [µm] and the variables `c` [mol/cm³], `phi1`, `phi2` [V, against the lithium foil], `theta` (the particle θ; the volume-mean θ of the crystal or agglomerate) and, for the crystal and agglomerate models, `theta_surf` (θ at the crystal or agglomerate surface). `profile_vars` chooses some (default: all). A value that does not exist at a node is NaN.
+- **When:** profiles are written on output rows, so they never change the time steps: with every `profile_every`-th row (counting the first as 0), at the first row at or after each time in `profile_times` [s], and with the last row.
+
 ## Restart files
 
 `restart_write = '<file>'` (group `&output`) writes the state at the end of a run: the electrode state, the crystal or agglomerate state, the time, the capacity and the last current, in plain text with 17 significant digits (an exact round trip). `restart_read = '<file>'` starts a run from it: the protocol runs from its first step at that state, time and capacity, and a first constant-voltage step starts its current search from the stored current. A run continued this way repeats the run it continues exactly (byte for byte in the Fortran and C++ programs, apart from round-off in Li_Nernst; `tests/test_restart.py`); its first output row repeats the last row of that run. The particle model and the mesh sizes must match the input. The three implementations read each other's files. Both models, corrected mode only; both are empty (off) by default.

@@ -99,6 +99,11 @@ class AggParams:
     write_interval: float = 18.0       # [s]
     restart_read: str = ""         # corrected mode: start from this restart file (#13); '' = the initial state
     restart_write: str = ""        # corrected mode: write the final state to this restart file; '' = none
+    columns: str = ""              # corrected mode: time-series columns to write (comma-separated); '' = all
+    profile_file: str = ""         # corrected mode: write profiles against x to this file (#12); '' = none
+    profile_vars: str = ""         # profile variables (comma-separated; '' = all of the model's)
+    profile_every: int = 0         # a profile with every N-th output row (0: only at profile_times and the end)
+    profile_times: str = ""        # [s] a profile at the first output row at or after each of these times
     mode: str = "faithful"
 
     @classmethod

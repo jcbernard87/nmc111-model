@@ -85,6 +85,9 @@ The defaults of `AggParams` and of the `&agglomerate` input. Values not listed a
 | `rtol`, `atol` | 10⁻⁴, 10⁻⁴ | adaptive: local error tolerances on the state (ln c, potentials in V, log-odds of θ) |
 | `dt_min`, `dt_max` | 10⁻⁶ s, 0 | adaptive: step bounds; `dt_max = 0` means `write_interval` |
 | `restart_read`, `restart_write` | `''` | `&output`: start from, or write the final state to, a restart file (docs/protocol.md; #13). Both models, corrected mode |
+| `columns` | `''` | `&output`: the time-series columns to write; `''` = all (docs/protocol.md; #12) |
+| `profile_file`, `profile_vars` | `''` | `&output`: write profiles against x to this file; their variables (`''` = all) |
+| `profile_every`, `profile_times` | 0, `''` | `&output`: a profile with every N-th output row; at the first row at or after each listed time [s] |
 
 
 ## Crystal model: inputs (corrected mode, `particle_model = 'crystal'`)

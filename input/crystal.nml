@@ -39,4 +39,6 @@
 &output
   file = 'Time_Voltage.txt', write_interval = 18.0
   restart_read = '', restart_write = ''   ! restart files: start from / write the final state (docs/protocol.md)
+  columns = ''             ! time-series columns to write, e.g. 'Voltage, Current'; '' = all
+  profile_file = '', profile_vars = '', profile_every = 0, profile_times = ''   ! profiles against x (docs/protocol.md)
 /
