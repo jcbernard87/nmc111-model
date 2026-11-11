@@ -18,6 +18,18 @@ identifiers:
   - type: doi
     value: 10.5281/zenodo.23093185
     description: Version 0.1.0
+  - type: doi
+    value: 10.5281/zenodo.23138791
+    description: Version 0.2.0
+  - type: doi
+    value: 10.5281/zenodo.23172093
+    description: Version 0.2.1
+  - type: doi
+    value: 10.5281/zenodo.23393193
+    description: Version 0.3.0
+  - type: doi
+    value: 10.5281/zenodo.24135832
+    description: Version 0.4.0
 repository-code: "https://github.com/jcbernard87/nmc111-model"
 url: "https://github.com/jcbernard87/nmc111-model"
 abstract: >-
