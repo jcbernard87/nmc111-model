@@ -23,7 +23,7 @@ jobs:
       - name: Install bandsolver and this package
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "bandsolver @ git+https://github.com/jcbernard87/bandsolver@v0.1.2"
+          python -m pip install "bandsolver @ git+https://github.com/jcbernard87/bandsolver@v0.1.3"
           python -m pip install -e ".[test,notebooks]" nbconvert ipykernel
       - name: Build the Fortran and C++ programs
         run: |
@@ -63,7 +63,7 @@ jobs:
       - name: Install bandsolver and this package
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "bandsolver @ git+https://github.com/jcbernard87/bandsolver@v0.1.2"
+          python -m pip install "bandsolver @ git+https://github.com/jcbernard87/bandsolver@v0.1.3"
           python -m pip install -e ".[test]"
       - name: Build the Fortran and C++ programs
         run: |
@@ -90,7 +90,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           # the release's Windows wheel (a source build needs Intel Fortran with MSVC, as bandsolver's CI uses)
-          python -m pip install "https://github.com/jcbernard87/bandsolver/releases/download/v0.1.2/bandsolver-0.1.2-cp312-cp312-win_amd64.whl"
+          python -m pip install "https://github.com/jcbernard87/bandsolver/releases/download/v0.1.3/bandsolver-0.1.3-cp312-cp312-win_amd64.whl"
           python -m pip install -e ".[test]"
       - name: Build the Fortran and C++ programs (MinGW)
         run: |

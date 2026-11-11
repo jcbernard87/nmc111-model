@@ -43,7 +43,7 @@ With a local bandsolver checkout, add `-DFETCHCONTENT_SOURCE_DIR_BANDSOLVER=/pat
 **Python:**
 
 ```sh
-pip install "bandsolver @ git+https://github.com/jcbernard87/bandsolver@v0.1.2"
+pip install "bandsolver @ git+https://github.com/jcbernard87/bandsolver@v0.1.3"
 pip install -e ".[notebooks]"
 python -m nmc_model input/agglomerate.nml
 ```
